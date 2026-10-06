@@ -33,7 +33,7 @@ export class BookingsService {
     // 1. Contrôle des dates
     if (startDate >= endDate) {
       throw new BadRequestException(
-        'La date de départ (checkOut) doit être strictement supérieure à la date d\'arrivée (checkIn).',
+        "La date de départ (checkOut) doit être strictement supérieure à la date d'arrivée (checkIn).",
       );
     }
 
@@ -41,7 +41,7 @@ export class BookingsService {
     today.setHours(0, 0, 0, 0);
     if (startDate < today) {
       throw new BadRequestException(
-        'La date d\'arrivée ne peut pas être située dans le passé.',
+        "La date d'arrivée ne peut pas être située dans le passé.",
       );
     }
 
@@ -89,7 +89,7 @@ export class BookingsService {
       );
     }
 
-    // 5. Calcul de la durée et des montants
+    // 5. Calcul de la durée et des montants (Série d'opérations corrigée)
     const diffTime = endDate.getTime() - startDate.getTime();
     const nightsCount = Math.ceil(diffTime / (1000 * 3600 * 24));
     const pricePerNight = Number(residence.pricePerNight);

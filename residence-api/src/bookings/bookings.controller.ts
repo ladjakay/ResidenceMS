@@ -12,7 +12,7 @@ import {
   Req,
   NotFoundException,
 } from '@nestjs/common';
-import type { Response } from 'express'; // Import type pour éviter l'erreur TS1272 / isolatedModules
+import type { Response } from 'express';
 import { BookingsService } from './bookings.service';
 import { PdfService } from './pdf.service';
 import { CreateBookingDto } from './dto/create-booking.dto';

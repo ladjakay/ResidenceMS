@@ -2,33 +2,36 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 
 export default function LoginPage() {
   const { login } = useAuth();
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setError(null);
-  setIsSubmitting(true);
+    e.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
 
-  try {
-    await login(email, password);
-  } catch (err: unknown) {
-    // Typer proprement l'erreur capturée
-    if (err instanceof Error) {
-      setError(err.message);
-    } else {
-      setError('Une erreur inconnue est survenue.');
+    try {
+      await login(email, password);
+      // Redirection directe vers le tableau de bord
+      router.push('/dashboard');
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Une erreur inconnue est survenue.');
+      }
+    } finally {
+      setIsSubmitting(false);
     }
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
