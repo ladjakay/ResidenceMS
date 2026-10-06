@@ -1,0 +1,99 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String
+  firstName String
+  lastName  String
+  roleId    String
+  role      Role      @relation(fields: [roleId], references: [id])
+  createdAt DateTime  @default(now())
+
+  bookings  Booking[] // <-- Relation inverse ajoutée pour le modèle Booking
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        String           @unique // SUPER_ADMIN, GERANT, AGENT
+  users       User[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  code        String           @unique // ex: 'booking:create', 'finance:view'
+  description String?
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  REFUNDED
+  COMPLETED
+}
+
+model Residence {
+  id            String    @id @default(uuid())
+  name          String
+  address       String?
+  pricePerNight Decimal   @db.Decimal(10, 2)
+  isAvailable   Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  bookings      Booking[]
+}
+
+model Tenant {
+  id        String    @id @default(uuid())
+  firstName String
+  lastName  String
+  email     String?   @unique
+  phone     String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  bookings  Booking[]
+}
+
+model Booking {
+  id             String        @id @default(uuid())
+  residenceId    String
+  tenantId       String
+  createdById    String
+  checkIn        DateTime
+  checkOut       DateTime
+  nightsCount    Int
+  pricePerNight  Decimal       @db.Decimal(10, 2)
+  totalAmount    Decimal       @db.Decimal(10, 2)
+  discountAmount Decimal       @default(0) @db.Decimal(10, 2)
+  notes          String?
+  status         BookingStatus @default(PENDING)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  residence      Residence     @relation(fields: [residenceId], references: [id])
+  tenant         Tenant        @relation(fields: [tenantId], references: [id])
+  createdBy      User          @relation(fields: [createdById], references: [id])
+}

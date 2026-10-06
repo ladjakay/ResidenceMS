@@ -1,0 +1,17 @@
+# Dépendances Node
+**/node_modules/
+**/.next/
+**/dist/
+**/build/
+
+# Environnements & Clés de sécurité
+**/.env
+**/.env.local
+
+# Logs
+**/npm-debug.log*
+**/yarn-debug.log*
+
+# Système & IDE
+.DS_Store
+.vscode/
