@@ -1,8 +1,3 @@
----
-
-### Fichier 2 : `README.en.md` (Version Anglaise)
-
-```markdown
 <div align="center">
 
 # 🏢 ResidenceMS — Residence Management System
