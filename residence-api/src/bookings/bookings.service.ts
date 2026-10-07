@@ -16,7 +16,9 @@ import { BookingStatus } from '@prisma/client';
 export class BookingsService {
   constructor(private readonly prisma: PrismaService) {}
 
-
+  /**
+   * Créer une réservation
+   */
   async create(createBookingDto: CreateBookingDto, createdById: string) {
     if (!createdById) {
       throw new UnauthorizedException(
@@ -91,7 +93,6 @@ export class BookingsService {
       );
     }
 
-    // Calculs corrigés
     const diffTime = endDate.getTime() - startDate.getTime();
     const nightsCount = Math.ceil(diffTime / (1000 * 3600 * 24));
     const pricePerNight = Number(residence.pricePerNight);
@@ -106,6 +107,7 @@ export class BookingsService {
         pricePerNight,
         totalAmount,
         discountAmount,
+        paidAmount: 0,
         notes,
         status: BookingStatus.PENDING,
         residence: {
@@ -133,6 +135,9 @@ export class BookingsService {
     };
   }
 
+  /**
+   * Récupérer toutes les réservations
+   */
   async findAll(status?: BookingStatus) {
     return this.prisma.booking.findMany({
       where: status ? { status } : {},
@@ -145,6 +150,9 @@ export class BookingsService {
     });
   }
 
+  /**
+   * Récupérer une réservation par ID
+   */
   async findOne(id: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id },
@@ -165,7 +173,7 @@ export class BookingsService {
   }
 
   /**
-   * Changer uniquement le statut de la réservation (PATCH /bookings/:id/status)
+   * Modifier le statut et le montant payé (PATCH /bookings/:id/status)
    */
   async updateStatus(id: string, dto: UpdateBookingStatusDto) {
     const booking = await this.findOne(id);
@@ -173,21 +181,41 @@ export class BookingsService {
     const newStatus = dto.status;
 
     if (currentStatus === BookingStatus.CANCELLED) {
-      throw new BadRequestException(
-        'Une réservation annulée ne peut plus être modifiée.',
-      );
+      throw new BadRequestException('Une réservation annulée ne peut plus être modifiée.');
     }
 
     if (currentStatus === BookingStatus.COMPLETED) {
-      throw new BadRequestException(
-        'Une réservation déjà terminée ne peut plus être modifiée.',
-      );
+      throw new BadRequestException('Une réservation déjà terminée ne peut plus être modifiée.');
+    }
+
+    const totalAmount = Number(booking.totalAmount);
+    let newPaidAmount = Number(booking.paidAmount ?? 0);
+
+    // Règle CONFIRMED
+    if (newStatus === BookingStatus.CONFIRMED) {
+      if (dto.paidAmount !== undefined) {
+        if (dto.paidAmount < 0) {
+          throw new BadRequestException('Le montant payé ne peut pas être négatif.');
+        }
+        if (dto.paidAmount > totalAmount) {
+          throw new BadRequestException(
+            `Le montant payé (${dto.paidAmount} FCFA) ne peut pas dépasser le montant total (${totalAmount} FCFA).`,
+          );
+        }
+        newPaidAmount = dto.paidAmount;
+      }
+    }
+
+    // Règle COMPLETED : tout est réglé
+    if (newStatus === BookingStatus.COMPLETED) {
+      newPaidAmount = totalAmount;
     }
 
     const updatedBooking = await this.prisma.booking.update({
       where: { id },
       data: {
         status: newStatus,
+        paidAmount: newPaidAmount,
         notes: dto.cancellationReason
           ? `${booking.notes || ''} | Raison annulation: ${dto.cancellationReason}`.trim()
           : booking.notes,
@@ -209,16 +237,18 @@ export class BookingsService {
    */
   async update(id: string, dto: UpdateBookingDto) {
     const booking = await this.findOne(id);
+    const totalAmount = Number(booking.totalAmount);
+    const paidAmount = Number(booking.paidAmount ?? 0);
 
-    if (booking.status === BookingStatus.CANCELLED) {
-      throw new BadRequestException(
-        'Une réservation annulée ne peut plus être modifiée.',
-      );
+    // Verrouillage 1 : CANCELLED ou COMPLETED
+    if (booking.status === BookingStatus.CANCELLED || booking.status === BookingStatus.COMPLETED) {
+      throw new BadRequestException('Une réservation annulée ou terminée ne peut plus être modifiée.');
     }
 
-    if (booking.status === BookingStatus.COMPLETED) {
+    // Verrouillage 2 : CONFIRMED totalement payée
+    if (booking.status === BookingStatus.CONFIRMED && paidAmount >= totalAmount) {
       throw new BadRequestException(
-        'Une réservation déjà terminée ne peut plus être modifiée.',
+        'Une réservation confirmée et entièrement réglée ne peut plus être éditée.',
       );
     }
 
@@ -260,13 +290,12 @@ export class BookingsService {
       throw new NotFoundException('Résidence introuvable.');
     }
 
-    // Calculs corrigés
     const diffTime = endDate.getTime() - startDate.getTime();
     const nightsCount = Math.ceil(diffTime / (1000 * 3600 * 24));
     const pricePerNight = Number(residence.pricePerNight);
     const discountAmount = Number(dto.discountAmount ?? booking.discountAmount);
     const rawTotal = pricePerNight * nightsCount;
-    const totalAmount = Math.max(0, rawTotal - discountAmount);
+    const newTotalAmount = Math.max(0, rawTotal - discountAmount);
 
     const updatedBooking = await this.prisma.booking.update({
       where: { id },
@@ -275,7 +304,7 @@ export class BookingsService {
         checkOut: endDate,
         nightsCount,
         pricePerNight,
-        totalAmount,
+        totalAmount: newTotalAmount,
         discountAmount,
         notes: dto.notes ?? booking.notes,
         residenceId,

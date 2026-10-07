@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString, IsNumber, Min } from 'class-validator';
 import { BookingStatus } from '@prisma/client';
 
 export class UpdateBookingStatusDto {
@@ -8,7 +8,12 @@ export class UpdateBookingStatusDto {
   @IsNotEmpty()
   status: BookingStatus;
 
-  @IsOptional()
+  
+  @IsNumber()
+  @Min(0)
   @IsString()
+  paidAmount?: number;
+  
+  @IsOptional()
   cancellationReason?: string;
 }
