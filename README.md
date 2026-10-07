@@ -2,15 +2,13 @@
 
 # 🏢 ResidenceMS — Système de Gestion de Résidences
 
-**[🇫🇷 Français](#-français) &nbsp;•&nbsp; [🇬🇧 English](#-english)**
+👉 **[Switch to English Version 🇬🇧](README.en.md)**
 
 ---
 
 </div>
 
-<a id="-français"></a>
-## 🇫🇷 FRANÇAIS
-
+## 📌 Sommaire
 * [1. Présentation du Projet & Architecture](#1-présentation-du-projet--architecture)
 * [2. Rôle de Chaque Élément de la Stack Technique](#2-rôle-de-chaque-élément-de-la-stack-technique)
 * [3. Description Fonctionnelle & Logique Métier](#3-description-fonctionnelle--logique-métier)
