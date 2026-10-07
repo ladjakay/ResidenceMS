@@ -18,6 +18,7 @@ import { BookingsService } from './bookings.service';
 import { PdfService } from './pdf.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
+import { UpdateBookingDto } from './dto/update-booking.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -31,10 +32,13 @@ export class BookingsController {
     private readonly pdfService: PdfService,
   ) {}
 
+  /**
+   * Créer une réservation
+   * POST /bookings
+   */
   @Post()
   @RequirePermissions('booking:create')
   async create(@Body() createBookingDto: CreateBookingDto, @Req() req: any) {
-    // Récupère l'ID utilisateur de manière sécurisée quel que soit le nom de la propriété
     const userId = req.user?.id || req.user?.userId || req.user?.sub;
 
     if (!userId) {
@@ -46,20 +50,32 @@ export class BookingsController {
     return this.bookingsService.create(createBookingDto, userId);
   }
 
+  /**
+   * Lister les réservations (avec ou sans filtre par statut)
+   * GET /bookings?status=PENDING
+   */
   @Get()
   @RequirePermissions('booking:read')
   async findAll(@Query('status') status?: BookingStatus) {
     return this.bookingsService.findAll(status);
   }
 
+  /**
+   * Obtenir les détails d'une réservation
+   * GET /bookings/:id
+   */
   @Get(':id')
   @RequirePermissions('booking:read')
   async findOne(@Param('id') id: string) {
     return this.bookingsService.findOne(id);
   }
 
+  /**
+   * Modifier uniquement le statut de la réservation
+   * PATCH /bookings/:id/status
+   */
   @Patch(':id/status')
-  @RequirePermissions('booking:update')
+  @RequirePermissions('booking:edit')
   async updateStatus(
     @Param('id') id: string,
     @Body() updateBookingStatusDto: UpdateBookingStatusDto,
@@ -67,6 +83,23 @@ export class BookingsController {
     return this.bookingsService.updateStatus(id, updateBookingStatusDto);
   }
 
+  /**
+   * Modifier les détails d'une réservation (dates, résidence, remise, notes)
+   * PATCH /bookings/:id
+   */
+  @Patch(':id')
+  @RequirePermissions('booking:edit')
+  async update(
+    @Param('id') id: string,
+    @Body() updateBookingDto: UpdateBookingDto,
+  ) {
+    return this.bookingsService.update(id, updateBookingDto);
+  }
+
+  /**
+   * Télécharger le reçu au format PDF
+   * GET /bookings/:id/receipt
+   */
   @Get(':id/receipt')
   @RequirePermissions('booking:read')
   async downloadReceipt(@Param('id') id: string, @Res() res: Response) {

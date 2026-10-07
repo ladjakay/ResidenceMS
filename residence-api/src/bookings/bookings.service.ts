@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { UpdateBookingDto } from './dto/update-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import { BookingStatus } from '@prisma/client';
 
@@ -15,8 +16,8 @@ import { BookingStatus } from '@prisma/client';
 export class BookingsService {
   constructor(private readonly prisma: PrismaService) {}
 
+
   async create(createBookingDto: CreateBookingDto, createdById: string) {
-    // 1. Validation de la présence de l'utilisateur créateur
     if (!createdById) {
       throw new UnauthorizedException(
         'Utilisateur non identifié. Veuillez vous reconnecter.',
@@ -37,7 +38,7 @@ export class BookingsService {
 
     if (startDate >= endDate) {
       throw new BadRequestException(
-        "La date de départ (checkOut) doit être strictly supérieure à la date d'arrivée (checkIn).",
+        "La date de départ (checkOut) doit être strictement supérieure à la date d'arrivée (checkIn).",
       );
     }
 
@@ -90,13 +91,13 @@ export class BookingsService {
       );
     }
 
+    // Calculs corrigés
     const diffTime = endDate.getTime() - startDate.getTime();
     const nightsCount = Math.ceil(diffTime / (1000 * 3600 * 24));
     const pricePerNight = Number(residence.pricePerNight);
     const rawTotal = pricePerNight * nightsCount;
     const totalAmount = Math.max(0, rawTotal - discountAmount);
 
-    // 2. Création de la réservation avec connexions Prisma explicites
     const booking = await this.prisma.booking.create({
       data: {
         checkIn: startDate,
@@ -132,9 +133,6 @@ export class BookingsService {
     };
   }
 
-  /**
-   * Récupérer toutes les réservations
-   */
   async findAll(status?: BookingStatus) {
     return this.prisma.booking.findMany({
       where: status ? { status } : {},
@@ -147,9 +145,6 @@ export class BookingsService {
     });
   }
 
-  /**
-   * Récupérer une réservation par son ID
-   */
   async findOne(id: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id },
@@ -170,7 +165,7 @@ export class BookingsService {
   }
 
   /**
-   * Changer le statut d'une réservation (Validation, Annulation, etc.)
+   * Changer uniquement le statut de la réservation (PATCH /bookings/:id/status)
    */
   async updateStatus(id: string, dto: UpdateBookingStatusDto) {
     const booking = await this.findOne(id);
@@ -178,11 +173,15 @@ export class BookingsService {
     const newStatus = dto.status;
 
     if (currentStatus === BookingStatus.CANCELLED) {
-      throw new BadRequestException('Une réservation annulée ne peut plus être modifiée.');
+      throw new BadRequestException(
+        'Une réservation annulée ne peut plus être modifiée.',
+      );
     }
 
     if (currentStatus === BookingStatus.COMPLETED) {
-      throw new BadRequestException('Une réservation déjà terminée ne peut plus être modifiée.');
+      throw new BadRequestException(
+        'Une réservation déjà terminée ne peut plus être modifiée.',
+      );
     }
 
     const updatedBooking = await this.prisma.booking.update({
@@ -201,6 +200,95 @@ export class BookingsService {
 
     return {
       message: `Statut de la réservation mis à jour vers "${newStatus}".`,
+      data: updatedBooking,
+    };
+  }
+
+  /**
+   * Modifier les détails d'une réservation (PATCH /bookings/:id)
+   */
+  async update(id: string, dto: UpdateBookingDto) {
+    const booking = await this.findOne(id);
+
+    if (booking.status === BookingStatus.CANCELLED) {
+      throw new BadRequestException(
+        'Une réservation annulée ne peut plus être modifiée.',
+      );
+    }
+
+    if (booking.status === BookingStatus.COMPLETED) {
+      throw new BadRequestException(
+        'Une réservation déjà terminée ne peut plus être modifiée.',
+      );
+    }
+
+    const residenceId = dto.residenceId || booking.residenceId;
+    const startDate = dto.checkIn ? new Date(dto.checkIn) : booking.checkIn;
+    const endDate = dto.checkOut ? new Date(dto.checkOut) : booking.checkOut;
+
+    if (startDate >= endDate) {
+      throw new BadRequestException(
+        "La date de départ (checkOut) doit être strictement supérieure à la date d'arrivée (checkIn).",
+      );
+    }
+
+    const overlappingBooking = await this.prisma.booking.findFirst({
+      where: {
+        id: { not: id },
+        residenceId,
+        status: {
+          notIn: [BookingStatus.CANCELLED, BookingStatus.REFUNDED],
+        },
+        AND: [
+          { checkIn: { lt: endDate } },
+          { checkOut: { gt: startDate } },
+        ],
+      },
+    });
+
+    if (overlappingBooking) {
+      throw new ConflictException(
+        `La résidence est déjà réservée sur cette nouvelle période (du ${startDate.toLocaleDateString('fr-FR')} au ${endDate.toLocaleDateString('fr-FR')}).`,
+      );
+    }
+
+    const residence = await this.prisma.residence.findUnique({
+      where: { id: residenceId },
+    });
+
+    if (!residence) {
+      throw new NotFoundException('Résidence introuvable.');
+    }
+
+    // Calculs corrigés
+    const diffTime = endDate.getTime() - startDate.getTime();
+    const nightsCount = Math.ceil(diffTime / (1000 * 3600 * 24));
+    const pricePerNight = Number(residence.pricePerNight);
+    const discountAmount = Number(dto.discountAmount ?? booking.discountAmount);
+    const rawTotal = pricePerNight * nightsCount;
+    const totalAmount = Math.max(0, rawTotal - discountAmount);
+
+    const updatedBooking = await this.prisma.booking.update({
+      where: { id },
+      data: {
+        checkIn: startDate,
+        checkOut: endDate,
+        nightsCount,
+        pricePerNight,
+        totalAmount,
+        discountAmount,
+        notes: dto.notes ?? booking.notes,
+        residenceId,
+        tenantId: dto.tenantId ?? booking.tenantId,
+      },
+      include: {
+        residence: true,
+        tenant: true,
+      },
+    });
+
+    return {
+      message: 'Réservation mise à jour avec succès.',
       data: updatedBooking,
     };
   }

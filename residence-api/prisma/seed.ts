@@ -6,7 +6,13 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('--- Début du Seeding des Rôles et Permissions ---');
 
-  // 1. Création des Permissions
+  // 1. Création des Permissions (avec ajout de booking:read)
+  const permBookingRead = await prisma.permission.upsert({
+    where: { code: 'booking:read' },
+    update: {},
+    create: { code: 'booking:read', description: 'Consulter la liste des réservations' },
+  });
+
   const permBookingCreate = await prisma.permission.upsert({
     where: { code: 'booking:create' },
     update: {},
@@ -51,21 +57,23 @@ async function main() {
   });
 
   // 3. Attribution des Permissions aux Rôles
-  // L'Agent a uniquement accès aux réservations
   await prisma.rolePermission.deleteMany({}); // Nettoyage préalable
 
   await prisma.rolePermission.createMany({
     data: [
-      // AGENT
+      // AGENT (Lecture, Création, Modification des réservations)
+      { roleId: roleAgent.id, permissionId: permBookingRead.id },
       { roleId: roleAgent.id, permissionId: permBookingCreate.id },
       { roleId: roleAgent.id, permissionId: permBookingEdit.id },
 
-      // GERANT (Réservations + Finance)
+      // GERANT (Réservations complet + Finance)
+      { roleId: roleGerant.id, permissionId: permBookingRead.id },
       { roleId: roleGerant.id, permissionId: permBookingCreate.id },
       { roleId: roleGerant.id, permissionId: permBookingEdit.id },
       { roleId: roleGerant.id, permissionId: permFinanceView.id },
 
       // SUPER ADMIN (Toutes les permissions)
+      { roleId: roleSuperAdmin.id, permissionId: permBookingRead.id },
       { roleId: roleSuperAdmin.id, permissionId: permBookingCreate.id },
       { roleId: roleSuperAdmin.id, permissionId: permBookingEdit.id },
       { roleId: roleSuperAdmin.id, permissionId: permFinanceView.id },
