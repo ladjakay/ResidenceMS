@@ -1,4 +1,4 @@
-// src/app/bookings/create/page.tsx
+// app/bookings/create/page.tsx
 import CreateBookingForm from '../../../components/bookings/CreateBookingForm';
 
 export default function CreateBookingPage() {

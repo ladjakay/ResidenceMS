@@ -14,8 +14,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    // Cette valeur est automatiquement injectée dans req.user pour les Guards (PermissionsGuard, etc.)
+    // Injecte 'id' ET 'userId' dans req.user pour garantir la compatibilité
     return {
+      id: payload.sub,
       userId: payload.sub,
       email: payload.email,
       role: payload.role,

@@ -56,6 +56,8 @@ export default function CreateBookingForm() {
           setResidences(residencesData);
           setTenants(tenantsData);
         } else {
+          // Pour vous aider à déboguer, on peut loguer le statut réel de l'erreur
+          console.error('Erreur API:', residencesRes.status, tenantsRes.status);
           setError('Impossible de charger la liste des résidences ou des clients.');
         }
       } catch (err: unknown) {
@@ -91,14 +93,16 @@ export default function CreateBookingForm() {
     }
 
     const diffInTime = end.getTime() - start.getTime();
+    // CORRECTION ICI : Ajout des opérateurs de multiplication
     const nights = Math.ceil(diffInTime / (1000 * 3600 * 24));
     const raw = nights * Number(selectedResidence.pricePerNight);
+    // CORRECTION ICI : Soustraction de la remise
     const final = Math.max(0, raw - Number(discountAmount || 0));
 
     return { nightsCount: nights, rawTotal: raw, finalTotal: final };
   }, [checkIn, checkOut, selectedResidence, discountAmount]);
 
-  // Soumission du formulaire vers l'API NestJS
+  
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -150,7 +154,6 @@ export default function CreateBookingForm() {
     }
   };
 
-  // Date minimale pour Check-in (Aujourd'hui)
   const todayStr = new Date().toISOString().split('T')[0];
 
   if (isFetchingData) {
@@ -181,7 +184,6 @@ export default function CreateBookingForm() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Sélection Résidence & Locataire */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -223,7 +225,6 @@ export default function CreateBookingForm() {
           </div>
         </div>
 
-        {/* Dates d'Arrivée et de Départ */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -254,7 +255,6 @@ export default function CreateBookingForm() {
           </div>
         </div>
 
-        {/* Remise & Notes */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -284,7 +284,6 @@ export default function CreateBookingForm() {
           </div>
         </div>
 
-        {/* Récapitulatif et Calcul Dynamique du Prix */}
         <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-100 space-y-3">
           <h3 className="text-base font-semibold text-indigo-950 border-b border-indigo-200 pb-2">
             Récapitulatif du séjour
@@ -309,7 +308,6 @@ export default function CreateBookingForm() {
           </div>
         </div>
 
-        {/* Boutons d'Action */}
         <div className="flex justify-end gap-4 pt-4">
           <button
             type="button"

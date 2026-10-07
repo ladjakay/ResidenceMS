@@ -11,6 +11,7 @@ import {
   UseGuards,
   Req,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { BookingsService } from './bookings.service';
@@ -33,7 +34,15 @@ export class BookingsController {
   @Post()
   @RequirePermissions('booking:create')
   async create(@Body() createBookingDto: CreateBookingDto, @Req() req: any) {
-    const userId = req.user.id;
+    // Récupère l'ID utilisateur de manière sécurisée quel que soit le nom de la propriété
+    const userId = req.user?.id || req.user?.userId || req.user?.sub;
+
+    if (!userId) {
+      throw new UnauthorizedException(
+        'Impossible d\'identifier l\'utilisateur connecté depuis le token JWT.',
+      );
+    }
+
     return this.bookingsService.create(createBookingDto, userId);
   }
 
@@ -69,7 +78,6 @@ export class BookingsController {
 
     const pdfBuffer = await this.pdfService.generateBookingReceipt(booking);
 
-    // Configuration des en-têtes de réponse pour le téléchargement
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',

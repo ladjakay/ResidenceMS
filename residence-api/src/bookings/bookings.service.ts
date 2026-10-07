@@ -4,6 +4,7 @@ import {
   BadRequestException,
   NotFoundException,
   ConflictException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
@@ -14,10 +15,14 @@ import { BookingStatus } from '@prisma/client';
 export class BookingsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Création d'une réservation avec vérification d'overbooking
-   */
   async create(createBookingDto: CreateBookingDto, createdById: string) {
+    // 1. Validation de la présence de l'utilisateur créateur
+    if (!createdById) {
+      throw new UnauthorizedException(
+        'Utilisateur non identifié. Veuillez vous reconnecter.',
+      );
+    }
+
     const {
       residenceId,
       tenantId,
@@ -30,10 +35,9 @@ export class BookingsService {
     const startDate = new Date(checkIn);
     const endDate = new Date(checkOut);
 
-    // 1. Contrôle des dates
     if (startDate >= endDate) {
       throw new BadRequestException(
-        "La date de départ (checkOut) doit être strictement supérieure à la date d'arrivée (checkIn).",
+        "La date de départ (checkOut) doit être strictly supérieure à la date d'arrivée (checkIn).",
       );
     }
 
@@ -45,7 +49,6 @@ export class BookingsService {
       );
     }
 
-    // 2. Vérification de l'existence et disponibilité de la résidence
     const residence = await this.prisma.residence.findUnique({
       where: { id: residenceId },
     });
@@ -60,7 +63,6 @@ export class BookingsService {
       );
     }
 
-    // 3. Vérification du client
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
     });
@@ -69,7 +71,6 @@ export class BookingsService {
       throw new NotFoundException('Le client / locataire indiqué est introuvable.');
     }
 
-    // 4. Contrôle Anti-Overbooking (Chevauchement de dates)
     const overlappingBooking = await this.prisma.booking.findFirst({
       where: {
         residenceId,
@@ -89,19 +90,15 @@ export class BookingsService {
       );
     }
 
-    // 5. Calcul de la durée et des montants (Série d'opérations corrigée)
     const diffTime = endDate.getTime() - startDate.getTime();
     const nightsCount = Math.ceil(diffTime / (1000 * 3600 * 24));
     const pricePerNight = Number(residence.pricePerNight);
     const rawTotal = pricePerNight * nightsCount;
     const totalAmount = Math.max(0, rawTotal - discountAmount);
 
-    // 6. Insertion de la réservation
+    // 2. Création de la réservation avec connexions Prisma explicites
     const booking = await this.prisma.booking.create({
       data: {
-        residenceId,
-        tenantId,
-        createdById,
         checkIn: startDate,
         checkOut: endDate,
         nightsCount,
@@ -110,6 +107,15 @@ export class BookingsService {
         discountAmount,
         notes,
         status: BookingStatus.PENDING,
+        residence: {
+          connect: { id: residenceId },
+        },
+        tenant: {
+          connect: { id: tenantId },
+        },
+        createdBy: {
+          connect: { id: createdById },
+        },
       },
       include: {
         residence: true,
@@ -171,7 +177,6 @@ export class BookingsService {
     const currentStatus = booking.status;
     const newStatus = dto.status;
 
-    // Règles de transition de statut
     if (currentStatus === BookingStatus.CANCELLED) {
       throw new BadRequestException('Une réservation annulée ne peut plus être modifiée.');
     }
@@ -180,7 +185,6 @@ export class BookingsService {
       throw new BadRequestException('Une réservation déjà terminée ne peut plus être modifiée.');
     }
 
-    // Mise à jour en base
     const updatedBooking = await this.prisma.booking.update({
       where: { id },
       data: {
