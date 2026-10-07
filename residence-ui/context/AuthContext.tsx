@@ -1,4 +1,4 @@
-// src/context/AuthContext.tsx
+// context/AuthContext.tsx
 'use client';
 
 import React, { createContext, useContext, useState, useSyncExternalStore } from 'react';
@@ -24,7 +24,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Helper React 19 pour détecter proprement le passage au client sans re-render synchrone
+
 const emptySubscribe = () => () => {};
 const useIsClient = () => {
   return useSyncExternalStore(
@@ -111,7 +111,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error("useAuth doit être utilisé à l'intérieur d'un AuthProvider");
+    throw new Error("useAuth doit être utilisé à l intérieur d'un AuthProvider");
   }
   return context;
 };
