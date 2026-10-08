@@ -47,9 +47,9 @@ export default function DashboardPage() {
       </header>
 
       {/* Cartes d'action selon les permissions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
 
-        {/* 1. Liste des réservations (Accessible à tous les utilisateurs connectés) */}
+        {/* 1. Liste des réservations */}
         <div className="bg-white p-6 rounded-lg shadow border border-gray-100 flex flex-col justify-between">
           <div>
             <h3 className="font-bold text-lg mb-2 text-gray-800">Réservations</h3>
@@ -65,7 +65,7 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        {/* 2. Création de réservation (Si la permission booking:create est présente) */}
+        {/* 2. Création de réservation */}
         {hasPermission('booking:create') && (
           <div className="bg-white p-6 rounded-lg shadow border border-gray-100 flex flex-col justify-between">
             <div>
@@ -83,13 +83,43 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* 3. Finances (Si la permission finance:view est présente) */}
+        {/* 3. Gestion des Clients */}
+        {hasPermission('client:read') ? (
+          <div className="bg-white p-6 rounded-lg shadow border border-gray-100 flex flex-col justify-between">
+            <div>
+              <h3 className="font-bold text-lg mb-2 text-gray-800">Clients</h3>
+              <p className="text-gray-600 text-sm mb-4">
+                Gérer le répertoire des clients, ajouter, éditer ou désactiver des fiches.
+              </p>
+            </div>
+            <Link
+              href="/clients"
+              className="inline-block text-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-md font-medium transition-colors"
+            >
+              Gérer les Clients
+            </Link>
+          </div>
+        ) : (
+          <div className="bg-gray-100 p-6 rounded-lg border border-gray-200 opacity-60 flex flex-col justify-between">
+            <div>
+              <h3 className="font-bold text-lg text-gray-500 mb-2">Clients (Accès Restreint)</h3>
+              <p className="text-gray-400 text-sm mb-4">
+                Vous ne beneificiez pas de la permission de gérer les fiches clients.
+              </p>
+            </div>
+            <button disabled className="px-4 py-2 bg-gray-300 text-gray-500 text-sm rounded-md cursor-not-allowed">
+              Accès restreint
+            </button>
+          </div>
+        )}
+
+        {/* 4. Finances */}
         {hasPermission('finance:view') ? (
           <div className="bg-white p-6 rounded-lg shadow border-l-4 border-green-500 flex flex-col justify-between">
             <div>
-              <h3 className="font-bold text-lg mb-2 text-gray-800">Chiffre d affaires & Finances</h3>
+              <h3 className="font-bold text-lg mb-2 text-gray-800">Chiffre affaires & Finances</h3>
               <p className="text-gray-600 text-sm mb-4">
-                Consulter les bilans financiers et le chiffre d affaires global.
+                Consulter les bilans financiers et le chiffre affaires global.
               </p>
             </div>
             <Link
@@ -103,7 +133,7 @@ export default function DashboardPage() {
           <div className="bg-gray-100 p-6 rounded-lg border border-gray-200 opacity-60 flex flex-col justify-between">
             <div>
               <h3 className="font-bold text-lg text-gray-500 mb-2">Finances (Accès Restreint)</h3>
-              <p className="text-gray-400 text-sm">
+              <p className="text-gray-400 text-sm mb-4">
                 Seuls les Gérants et le Propriétaire ont accès aux états financiers.
               </p>
             </div>

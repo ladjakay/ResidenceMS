@@ -71,6 +71,7 @@ model Tenant {
   lastName  String
   email     String?   @unique
   phone     String
+  isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 

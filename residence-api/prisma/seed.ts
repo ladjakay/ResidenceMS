@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('--- Début du Seeding des Rôles et Permissions ---');
 
-  // 1. Création des Permissions (avec ajout de booking:read)
+  // 1. Permissions Réservations
   const permBookingRead = await prisma.permission.upsert({
     where: { code: 'booking:read' },
     update: {},
@@ -25,6 +25,32 @@ async function main() {
     create: { code: 'booking:edit', description: 'Modifier une réservation' },
   });
 
+  // 2. Permissions Clients
+  const permClientRead = await prisma.permission.upsert({
+    where: { code: 'client:read' },
+    update: {},
+    create: { code: 'client:read', description: 'Consulter la liste et les détails des clients' },
+  });
+
+  const permClientCreate = await prisma.permission.upsert({
+    where: { code: 'client:create' },
+    update: {},
+    create: { code: 'client:create', description: 'Créer un nouveau client' },
+  });
+
+  const permClientEdit = await prisma.permission.upsert({
+    where: { code: 'client:update' },
+    update: {},
+    create: { code: 'client:update', description: 'Modifier les informations d\'un client' },
+  });
+
+  const permClientDelete = await prisma.permission.upsert({
+    where: { code: 'client:delete' },
+    update: {},
+    create: { code: 'client:delete', description: 'Désactiver ou réactiver un client' },
+  });
+
+  // 3. Permissions Finances & Administration
   const permFinanceView = await prisma.permission.upsert({
     where: { code: 'finance:view' },
     update: {},
@@ -37,7 +63,7 @@ async function main() {
     create: { code: 'permissions:manage', description: 'Gérer les utilisateurs et rôles' },
   });
 
-  // 2. Création des Rôles
+  // 4. Rôles
   const roleSuperAdmin = await prisma.role.upsert({
     where: { name: 'SUPER_ADMIN' },
     update: {},
@@ -56,26 +82,37 @@ async function main() {
     create: { name: 'AGENT' },
   });
 
-  // 3. Attribution des Permissions aux Rôles
+  // 5. Attribution des Permissions aux Rôles
   await prisma.rolePermission.deleteMany({}); // Nettoyage préalable
 
   await prisma.rolePermission.createMany({
     data: [
-      // AGENT (Lecture, Création, Modification des réservations)
+      // AGENT (Réservations + Consultation, Création, Modification Clients)
       { roleId: roleAgent.id, permissionId: permBookingRead.id },
       { roleId: roleAgent.id, permissionId: permBookingCreate.id },
       { roleId: roleAgent.id, permissionId: permBookingEdit.id },
+      { roleId: roleAgent.id, permissionId: permClientRead.id },
+      { roleId: roleAgent.id, permissionId: permClientCreate.id },
+      { roleId: roleAgent.id, permissionId: permClientEdit.id },
 
-      // GERANT (Réservations complet + Finance)
+      // GERANT (Réservations + Finance + Gestion complète Clients)
       { roleId: roleGerant.id, permissionId: permBookingRead.id },
       { roleId: roleGerant.id, permissionId: permBookingCreate.id },
       { roleId: roleGerant.id, permissionId: permBookingEdit.id },
+      { roleId: roleGerant.id, permissionId: permClientRead.id },
+      { roleId: roleGerant.id, permissionId: permClientCreate.id },
+      { roleId: roleGerant.id, permissionId: permClientEdit.id },
+      { roleId: roleGerant.id, permissionId: permClientDelete.id },
       { roleId: roleGerant.id, permissionId: permFinanceView.id },
 
       // SUPER ADMIN (Toutes les permissions)
       { roleId: roleSuperAdmin.id, permissionId: permBookingRead.id },
       { roleId: roleSuperAdmin.id, permissionId: permBookingCreate.id },
       { roleId: roleSuperAdmin.id, permissionId: permBookingEdit.id },
+      { roleId: roleSuperAdmin.id, permissionId: permClientRead.id },
+      { roleId: roleSuperAdmin.id, permissionId: permClientCreate.id },
+      { roleId: roleSuperAdmin.id, permissionId: permClientEdit.id },
+      { roleId: roleSuperAdmin.id, permissionId: permClientDelete.id },
       { roleId: roleSuperAdmin.id, permissionId: permFinanceView.id },
       { roleId: roleSuperAdmin.id, permissionId: permUserManage.id },
     ],

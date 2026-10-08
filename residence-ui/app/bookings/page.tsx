@@ -1,7 +1,7 @@
 // residence-ui/app/bookings/page.tsx
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import DownloadReceiptButton from '@/components/bookings/DownloadReceiptButton';
 
@@ -23,6 +23,13 @@ export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // États pour les filtres de recherche
+  const [searchTenant, setSearchTenant] = useState<string>('');
+  const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [selectedResidence, setSelectedResidence] = useState<string>('');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
 
   // État du modal pour la confirmation de paiement
   const [selectedBookingForConfirm, setSelectedBookingForConfirm] = useState<Booking | null>(null);
@@ -90,6 +97,76 @@ export default function BookingsPage() {
       .finally(() => setLoading(false));
   };
 
+  // Extrait la liste unique des résidences pour le filtre
+  const uniqueResidences = useMemo(() => {
+    const map = new Map<string, string>();
+    bookings.forEach((b) => {
+      if (b.residence?.name) {
+        map.set(b.residence.id || b.residence.name, b.residence.name);
+      }
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [bookings]);
+
+  // Applique les filtres combinés
+  const filteredBookings = useMemo(() => {
+    return bookings.filter((booking) => {
+      // 1. Filtre Nom / Prénom Client (Partiel ou complet)
+      if (searchTenant.trim()) {
+        const query = searchTenant.trim().toLowerCase();
+        const firstName = (booking.tenant?.firstName || '').toLowerCase();
+        const lastName = (booking.tenant?.lastName || '').toLowerCase();
+        const fullName = `${lastName} ${firstName}`.toLowerCase();
+        const reverseFullName = `${firstName} ${lastName}`.toLowerCase();
+
+        const matchesTenant =
+          firstName.includes(query) ||
+          lastName.includes(query) ||
+          fullName.includes(query) ||
+          reverseFullName.includes(query);
+
+        if (!matchesTenant) return false;
+      }
+
+      // 2. Filtre Statut
+      if (selectedStatus && booking.status !== selectedStatus) {
+        return false;
+      }
+
+      // 3. Filtre Résidence
+      if (selectedResidence) {
+        const resId = booking.residence?.id;
+        const resName = booking.residence?.name;
+        if (resId !== selectedResidence && resName !== selectedResidence) {
+          return false;
+        }
+      }
+
+      // 4. Filtre Période (Check-in & Check-out)
+      if (startDate) {
+        const bookingIn = new Date(booking.checkIn);
+        const filterStart = new Date(startDate);
+        if (bookingIn < filterStart) return false;
+      }
+
+      if (endDate) {
+        const bookingOut = new Date(booking.checkOut);
+        const filterEnd = new Date(endDate);
+        if (bookingOut > filterEnd) return false;
+      }
+
+      return true;
+    });
+  }, [bookings, searchTenant, selectedStatus, selectedResidence, startDate, endDate]);
+
+  const resetFilters = () => {
+    setSearchTenant('');
+    setSelectedStatus('');
+    setSelectedResidence('');
+    setStartDate('');
+    setEndDate('');
+  };
+
   const submitStatusChange = async (
     bookingId: string,
     newStatus: string,
@@ -142,7 +219,7 @@ export default function BookingsPage() {
 
   if (loading) {
     return (
-      <div className="p-8 text-center text-gray-500">
+      <div className="p-8 text-center text-gray-300">
         Chargement des réservations en cours...
       </div>
     );
@@ -150,15 +227,16 @@ export default function BookingsPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4">
+      {/* En-tête de page éclairci */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-700 pb-4">
         <div>
           <Link
             href="/dashboard"
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium inline-flex items-center gap-1 mb-1"
+            className="text-sm text-blue-400 hover:text-blue-300 font-medium inline-flex items-center gap-1 mb-1"
           >
             ← Retour au Tableau de bord
           </Link>
-          <h1 className="text-2xl font-bold text-gray-800">
+          <h1 className="text-2xl font-bold text-white">
             Gestion des Réservations
           </h1>
         </div>
@@ -166,7 +244,7 @@ export default function BookingsPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={handleRefresh}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-md transition"
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-sm font-medium rounded-md border border-gray-600 transition"
           >
             Rafraîchir
           </button>
@@ -180,7 +258,7 @@ export default function BookingsPage() {
       </div>
 
       {error && (
-        <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg flex justify-between items-center">
+        <div className="p-4 bg-red-900/40 border border-red-700 text-red-200 rounded-lg flex justify-between items-center">
           <span>{error}</span>
           <button
             onClick={handleRefresh}
@@ -191,18 +269,117 @@ export default function BookingsPage() {
         </div>
       )}
 
-      {bookings.length === 0 ? (
-        <div className="p-8 text-center bg-white rounded-lg border shadow-sm text-gray-500">
-          <p className="mb-4">Aucune réservation trouvée.</p>
-          <Link
-            href="/bookings/new"
-            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-          >
-            Créer une première réservation
-          </Link>
+      {/* Barre de Filtres Multi-critères */}
+      <div className="bg-white p-4 rounded-xl shadow-md border border-gray-200 space-y-3">
+        <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+          <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wider">
+            Filtres de recherche
+          </h2>
+          {(searchTenant || selectedStatus || selectedResidence || startDate || endDate) && (
+            <button
+              onClick={resetFilters}
+              className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline"
+            >
+              Réinitialiser les filtres
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {/* 1. Recherche par nom/prénom client */}
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">
+              Client
+            </label>
+            <input
+              type="text"
+              value={searchTenant}
+              onChange={(e) => setSearchTenant(e.target.value)}
+              placeholder="Nom ou prénom..."
+              className="w-full border border-gray-300 rounded-lg p-2 text-xs font-semibold text-gray-900 bg-white placeholder-gray-400 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            />
+          </div>
+
+          {/* 2. Filtre par Statut */}
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">
+              Statut
+            </label>
+            <select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg p-2 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            >
+              <option value="">Tous les statuts</option>
+              <option value="PENDING">PENDING</option>
+              <option value="CONFIRMED">CONFIRMED</option>
+              <option value="COMPLETED">COMPLETED</option>
+              <option value="CANCELLED">CANCELLED</option>
+            </select>
+          </div>
+
+          {/* 3. Filtre par Résidence */}
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">
+              Résidence
+            </label>
+            <select
+              value={selectedResidence}
+              onChange={(e) => setSelectedResidence(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg p-2 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            >
+              <option value="">Toutes les résidences</option>
+              {uniqueResidences.map((res) => (
+                <option key={res.id} value={res.id}>
+                  {res.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 4. Date d'arrivée (Check-in à partir du) */}
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">
+              Check-in à partir du
+            </label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg p-2 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            />
+          </div>
+
+          {/* 5. Date de départ (Check-out jusqu'au) */}
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">
+              Check-out à partir du
+            </label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg p-2 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Tableau des réservations filtrées */}
+      {filteredBookings.length === 0 ? (
+        <div className="p-8 text-center bg-white rounded-lg border shadow-sm text-gray-500 space-y-3">
+          <p>Aucune réservation ne correspond à vos critères de recherche.</p>
+          {(searchTenant || selectedStatus || selectedResidence || startDate || endDate) && (
+            <button
+              onClick={resetFilters}
+              className="px-4 py-2 text-xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md transition"
+            >
+              Effacer les filtres
+            </button>
+          )}
         </div>
       ) : (
-        <div className="overflow-x-auto border rounded-lg shadow-sm bg-white">
+        <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b bg-gray-50 text-sm font-semibold text-gray-700">
@@ -214,8 +391,8 @@ export default function BookingsPage() {
                 <th className="p-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
-              {bookings.map((booking) => {
+            <tbody className="divide-y divide-gray-200">
+              {filteredBookings.map((booking) => {
                 const tenantName =
                   booking.tenant?.lastName || booking.tenant?.firstName
                     ? `${booking.tenant?.lastName ?? ''} ${booking.tenant?.firstName ?? ''}`.trim()
@@ -225,7 +402,6 @@ export default function BookingsPage() {
                 const total = Number(booking.totalAmount) || 0;
                 const paid = Number(booking.paidAmount) || 0;
 
-                // Verrouillage de l'édition si CANCELLED, COMPLETED ou CONFIRMED totalement payée
                 const isLocked =
                   booking.status === 'CANCELLED' ||
                   booking.status === 'COMPLETED' ||
@@ -233,8 +409,8 @@ export default function BookingsPage() {
 
                 return (
                   <tr key={booking.id} className="hover:bg-gray-50">
-                    <td className="p-3 font-medium text-gray-900">{tenantName}</td>
-                    <td className="p-3 text-gray-600">{residenceName}</td>
+                    <td className="p-3 font-semibold text-gray-900">{tenantName}</td>
+                    <td className="p-3 text-gray-600 font-medium">{residenceName}</td>
                     <td className="p-3">
                       <span
                         className={`px-2.5 py-1 text-xs font-semibold rounded-full ${

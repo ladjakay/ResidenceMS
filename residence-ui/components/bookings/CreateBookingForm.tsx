@@ -93,10 +93,8 @@ export default function CreateBookingForm() {
     }
 
     const diffInTime = end.getTime() - start.getTime();
-    // CORRECTION ICI : Ajout des opérateurs de multiplication
     const nights = Math.ceil(diffInTime / (1000 * 3600 * 24));
     const raw = nights * Number(selectedResidence.pricePerNight);
-    // CORRECTION ICI : Soustraction de la remise
     const final = Math.max(0, raw - Number(discountAmount || 0));
 
     return { nightsCount: nights, rawTotal: raw, finalTotal: final };
