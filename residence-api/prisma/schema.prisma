@@ -19,7 +19,7 @@ model User {
   role      Role      @relation(fields: [roleId], references: [id])
   createdAt DateTime  @default(now())
 
-  bookings  Booking[] // <-- Relation inverse ajoutée pour le modèle Booking
+  bookings  Booking[] //
 }
 
 model Role {

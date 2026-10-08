@@ -4,10 +4,7 @@ import PDFDocument from 'pdfkit';
 
 @Injectable()
 export class PdfService {
-  /**
-   * Helper pour formater proprement les montants avec un espace standard
-   * Évite les bogues d'affichage de caractères (ex: "10 /000 FCFA") dans PDFKit
-   */
+  
   private formatFCFA(amount: number): string {
     const val = Math.round(Number(amount) || 0);
     return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' FCFA';

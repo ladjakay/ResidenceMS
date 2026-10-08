@@ -205,8 +205,7 @@ export class BookingsService {
         newPaidAmount = dto.paidAmount;
       }
     }
-
-    // Règle COMPLETED : tout est réglé
+    // Règle COMPLETED
     if (newStatus === BookingStatus.COMPLETED) {
       newPaidAmount = totalAmount;
     }

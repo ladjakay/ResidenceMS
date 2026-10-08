@@ -83,7 +83,7 @@ async function main() {
   });
 
   // 5. Attribution des Permissions aux Rôles
-  await prisma.rolePermission.deleteMany({}); // Nettoyage préalable
+  await prisma.rolePermission.deleteMany({});
 
   await prisma.rolePermission.createMany({
     data: [
