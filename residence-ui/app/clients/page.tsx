@@ -214,7 +214,7 @@ export default function ClientsPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Ex: Bamba, Amidou, 0707..."
+              placeholder="Ex: Remy, Amidou, 0707..."
               className="w-full border border-gray-300 rounded-lg p-2 text-xs font-semibold text-gray-900 bg-white placeholder-gray-400 focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
