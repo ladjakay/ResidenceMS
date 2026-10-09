@@ -143,6 +143,24 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* Gestion des Utilisateurs (SUPER_ADMIN uniquement) */}
+{user?.role === 'SUPER_ADMIN' && (
+  <div className="bg-white p-6 rounded-lg shadow border-l-4 border-purple-500 flex flex-col justify-between">
+    <div>
+      <h3 className="font-bold text-lg mb-2 text-gray-800">Gestion Utilisateurs</h3>
+      <p className="text-gray-600 text-sm mb-4">
+        Gérer les comptes utilisateurs, attribuer les rôles et administrer les permissions.
+      </p>
+    </div>
+    <Link
+      href="/users"
+      className="inline-block text-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-md font-medium transition-colors"
+    >
+      Gérer les Utilisateurs
+    </Link>
+  </div>
+)}
+
       </div>
     </div>
   );

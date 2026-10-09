@@ -73,6 +73,9 @@ export class BookingsService {
     if (!tenant) {
       throw new NotFoundException('Le client / locataire indiqué est introuvable.');
     }
+    if (!tenant.isActive) {
+      throw new BadRequestException('Ce client est désactivé. Impossible d\'effectuer une nouvelle réservation.');
+    }
 
     const overlappingBooking = await this.prisma.booking.findFirst({
       where: {

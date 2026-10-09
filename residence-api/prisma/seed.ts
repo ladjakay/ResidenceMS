@@ -1,5 +1,6 @@
 // prisma/seed.ts
 import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
@@ -117,6 +118,38 @@ async function main() {
       { roleId: roleSuperAdmin.id, permissionId: permUserManage.id },
     ],
   });
+
+  // 6. Liaison / Vérification du Compte SUPER_ADMIN existant
+  const adminEmail = 'admin@admin.com'; // Ajustez avec l'email exact du compte admin existant si nécessaire
+
+  const existingAdmin = await prisma.user.findUnique({
+    where: { email: adminEmail },
+  });
+
+  if (existingAdmin) {
+    await prisma.user.update({
+      where: { email: adminEmail },
+      data: {
+        roleId: roleSuperAdmin.id,
+        isActive: true,
+      },
+    });
+    console.log(`Compte admin existant (${adminEmail}) associé au rôle SUPER_ADMIN.`);
+  } else {
+    // Création de secours uniquement si la base est totalement vierge
+    const hashedPassword = await bcrypt.hash('Admin1234!', 10);
+    await prisma.user.create({
+      data: {
+        firstName: 'Super',
+        lastName: 'Admin',
+        email: adminEmail,
+        password: hashedPassword,
+        isActive: true,
+        roleId: roleSuperAdmin.id,
+      },
+    });
+    console.log(`Nouveau compte admin initialisé : ${adminEmail}`);
+  }
 
   console.log('--- Seeding terminé avec succès ! ---');
 }

@@ -10,16 +10,19 @@ datasource db {
 }
 
 model User {
-  id        String    @id @default(uuid())
-  email     String    @unique
-  password  String
-  firstName String
-  lastName  String
-  roleId    String
-  role      Role      @relation(fields: [roleId], references: [id])
-  createdAt DateTime  @default(now())
+  id              String           @id @default(uuid())
+  email           String           @unique
+  password        String
+  firstName       String
+  lastName        String
+  isActive        Boolean          @default(true)
+  roleId          String
+  role            Role             @relation(fields: [roleId], references: [id])
+  userPermissions UserPermission[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @default(now()) @updatedAt // <-- Ajouter @default(now())
 
-  bookings  Booking[] //
+  bookings        Booking[]
 }
 
 model Role {
@@ -31,9 +34,10 @@ model Role {
 
 model Permission {
   id          String           @id @default(uuid())
-  code        String           @unique // ex: 'booking:create', 'finance:view'
+  code        String           @unique // ex: 'booking:create', 'permissions:manage'
   description String?
   roles       RolePermission[]
+  users       UserPermission[] // Ajouté
 }
 
 model RolePermission {
@@ -45,6 +49,16 @@ model RolePermission {
   @@id([roleId, permissionId])
 }
 
+// Ajouté : Table de liaison pour les permissions directement attribuées à un utilisateur
+model UserPermission {
+  userId       String
+  permissionId String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+}
+
 enum BookingStatus {
   PENDING
   CONFIRMED
@@ -54,26 +68,26 @@ enum BookingStatus {
 }
 
 model Residence {
-  id            String    @id @default(uuid())
+  id            String   @id @default(uuid())
   name          String
   address       String?
-  pricePerNight Decimal   @db.Decimal(10, 2)
-  isAvailable   Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  pricePerNight Decimal  @db.Decimal(10, 2)
+  isAvailable   Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   bookings      Booking[]
 }
 
 model Tenant {
-  id        String    @id @default(uuid())
+  id        String   @id @default(uuid())
   firstName String
   lastName  String
-  email     String?   @unique
+  email     String?  @unique
   phone     String
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   bookings  Booking[]
 }

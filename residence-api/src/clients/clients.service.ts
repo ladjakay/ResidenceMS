@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClientDto, UpdateClientDto } from './dto/client.dto';
 
@@ -52,25 +53,71 @@ export class ClientsService {
   }
 
   async create(dto: CreateClientDto) {
-    if (dto.email) {
-      const existing = await this.prisma.tenant.findUnique({ where: { email: dto.email } });
-      if (existing) {
-        throw new ConflictException('Un client avec cet email existe déjà.');
-      }
-    }
+    // Normalisation de l'email : conversion des chaînes vides "" ou espaces en null
+    const emailFormatted = dto.email && dto.email.trim() !== '' ? dto.email.trim() : null;
+    const phoneFormatted = dto.phone && dto.phone.trim() !== '' ? dto.phone.trim() : dto.phone;
 
-    return this.prisma.tenant.create({
-      data: dto,
-    });
+    try {
+      return await this.prisma.tenant.create({
+        data: {
+          ...dto,
+          email: emailFormatted,
+          phone: phoneFormatted,
+        },
+      });
+    } catch (error) {
+      // Interception de la contrainte d'unicité Prisma (P2002)
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const target = (error.meta?.target as string[]) || [];
+        if (target.includes('email')) {
+          throw new ConflictException('Un client avec cet email existe déjà.');
+        }
+        if (target.includes('phone')) {
+          throw new ConflictException('Un client avec ce numéro de téléphone existe déjà.');
+        }
+        throw new ConflictException('Un client avec ces informations existe déjà.');
+      }
+      throw error;
+    }
   }
 
   async update(id: string, dto: UpdateClientDto) {
     await this.findOne(id);
 
-    return this.prisma.tenant.update({
-      where: { id },
-      data: dto,
-    });
+    const dataToUpdate: any = { ...dto };
+    
+    // Normalisation si présent dans le DTO
+    if (dto.email !== undefined) {
+      dataToUpdate.email = dto.email && dto.email.trim() !== '' ? dto.email.trim() : null;
+    }
+    if (dto.phone !== undefined) {
+      dataToUpdate.phone = dto.phone && dto.phone.trim() !== '' ? dto.phone.trim() : dto.phone;
+    }
+
+    try {
+      return await this.prisma.tenant.update({
+        where: { id },
+        data: dataToUpdate,
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const target = (error.meta?.target as string[]) || [];
+        if (target.includes('email')) {
+          throw new ConflictException('Un autre client utilise déjà cet email.');
+        }
+        if (target.includes('phone')) {
+          throw new ConflictException('Un autre client utilise déjà ce numéro de téléphone.');
+        }
+        throw new ConflictException('Conflit d\'unicité sur les informations du client.');
+      }
+      throw error;
+    }
   }
 
   async toggleStatus(id: string, isActive: boolean) {

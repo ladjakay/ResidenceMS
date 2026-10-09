@@ -13,28 +13,62 @@ export class PermissionsGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    // 1. Récupérer les permissions définies sur la méthode ou le contrôleur via @RequirePermissions()
+    // 1. Récupération des permissions requises sur la route
     const requiredPermissions = this.reflector.getAllAndOverride<string[]>(
       PERMISSIONS_KEY,
       [context.getHandler(), context.getClass()],
     );
 
-    // Si aucune permission particulière n'est exigée, on laisse passer la requête
+    // Si la route ne nécessite aucune permission spécifique, l'accès est libre
     if (!requiredPermissions || requiredPermissions.length === 0) {
       return true;
     }
 
-    // 2. Extraire l'utilisateur injecté par le JwtAuthGuard dans l'objet Request
+    // 2. Extraction de l'utilisateur injecté par JwtStrategy
     const request = context.switchToHttp().getRequest();
     const user = request.user;
 
-    if (!user || !user.permissions) {
-      throw new ForbiddenException("Accès refusé : Profil utilisateur ou permissions introuvables.");
+    if (!user) {
+      throw new ForbiddenException("Accès refusé : Profil utilisateur introuvable.");
     }
 
-    // 3. Vérifier si l'utilisateur possède au moins une des permissions requises (ou TOUTES selon votre politique)
+    // 3. Passe-droit automatique pour le SUPER_ADMIN (Accès total au système)
+    const roleName = typeof user.role === 'object' ? user.role?.name : user.role;
+    if (roleName === 'SUPER_ADMIN') {
+      return true;
+    }
+
+    // 4. Extraction des permissions attribuées directement à l'Utilisateur (UserPermission)
+    const directPermissions: string[] =
+      user.userPermissions?.map(
+        (up: any) => up.permission?.code || up.permission,
+      ).filter(Boolean) || [];
+
+    // 5. Extraction des permissions rattachées au Rôle (si définies via RolePermission)
+    const rolePermissions: string[] =
+      user.role?.permissions?.map(
+        (rp: any) => rp.permission?.code || rp.permission,
+      ).filter(Boolean) || [];
+
+    // Support de rétrocompatibilité (si user.permissions est un tableau de chaînes basique)
+    const legacyPermissions: string[] = Array.isArray(user.permissions) ? user.permissions : [];
+
+    // 6. Fusion globale des permissions uniques
+    const effectivePermissions = new Set([
+      ...directPermissions,
+      ...rolePermissions,
+      ...legacyPermissions,
+    ]);
+
+    if (effectivePermissions.size === 0) {
+      throw new ForbiddenException(
+        "Accès refusé : Le Super Admin ne vous a attribué aucune permission.",
+      );
+    }
+
+    // 7. Vérification de la présence d'au moins une des permissions requises pour exécuter l'action
     const hasPermission = requiredPermissions.some((permission) =>
-      user.permissions.includes(permission),
+      effectivePermissions.has(permission),
     );
 
     if (!hasPermission) {

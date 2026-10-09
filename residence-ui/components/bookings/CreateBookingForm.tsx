@@ -38,7 +38,7 @@ export default function CreateBookingForm() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Charger la liste des résidences et locataires au chargement
+  // Charger la liste des résidences et locataires/clients actifs au chargement
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -47,16 +47,26 @@ export default function CreateBookingForm() {
 
         const [residencesRes, tenantsRes] = await Promise.all([
           fetch('http://localhost:3000/residences', { headers }),
-          fetch('http://localhost:3000/tenants', { headers }),
+          // 1. Ajout de ?status=active pour demander au backend uniquement les clients actifs
+          fetch('http://localhost:3000/clients?status=active', { headers }),
         ]);
 
         if (residencesRes.ok && tenantsRes.ok) {
           const residencesData = await residencesRes.json();
           const tenantsData = await tenantsRes.json();
-          setResidences(residencesData);
-          setTenants(tenantsData);
+
+          // Extraction sécurisée des tableaux de données
+          const residencesList = Array.isArray(residencesData) ? residencesData : residencesData.data || [];
+          const tenantsList = Array.isArray(tenantsData) ? tenantsData : tenantsData.data || [];
+
+          // 2. Filtrage côté client : Sécurité supplémentaire pour ne garder QUE les clients ayant isActive !== false
+          const activeTenantsOnly = tenantsList.filter(
+            (tenant: { isActive?: boolean }) => tenant.isActive !== false
+          );
+
+          setResidences(residencesList);
+          setTenants(activeTenantsOnly);
         } else {
-          // Pour vous aider à déboguer, on peut loguer le statut réel de l'erreur
           console.error('Erreur API:', residencesRes.status, tenantsRes.status);
           setError('Impossible de charger la liste des résidences ou des clients.');
         }
