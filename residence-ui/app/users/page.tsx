@@ -32,7 +32,7 @@ export default function UsersManagementPage() {
   const [isFetching, setIsFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Clé de déclenchement pour forcer le rechargement après une action
+  // Clé de rafraîchissement
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Filtres
@@ -42,6 +42,7 @@ export default function UsersManagementPage() {
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isCreatePermOpen, setIsCreatePermOpen] = useState(false); // Modal permissions pour la création
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isRolePermOpen, setIsRolePermOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -55,16 +56,26 @@ export default function UsersManagementPage() {
     role: 'AGENT',
   });
 
+  // Permissions sélectionnées lors de la création
+  const [createPermissions, setCreatePermissions] = useState<string[]>([]);
+
+  // Permissions et rôle sélectionnés lors de la modification des droits
   const [selectedRole, setSelectedRole] = useState<string>('AGENT');
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
 
-  // Helper pour déclencher un rafraîchissement explicite depuis les formulaires
+  // Classes de style haut contraste
+  const inputStyle =
+    'w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-bold text-gray-900 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent';
+
+  const selectStyle =
+    'w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-bold text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent cursor-pointer';
+
   const refetchUsers = () => {
     setIsFetching(true);
     setRefreshTrigger((prev) => prev + 1);
   };
 
-  // 1. Protection de la page : réservée EXCLUSIVEMENT au SUPER_ADMIN
+  // 1. Protection de la page : réservée au SUPER_ADMIN
   useEffect(() => {
     if (!isLoading) {
       if (!user) {
@@ -75,7 +86,7 @@ export default function UsersManagementPage() {
     }
   }, [user, isLoading, router]);
 
-  // 2. Chargement asynchrone des utilisateurs (Sans setState synchrone dans l'effet)
+  // 2. Chargement asynchrone des utilisateurs
   useEffect(() => {
     if (user?.role !== 'SUPER_ADMIN') return;
 
@@ -148,7 +159,24 @@ export default function UsersManagementPage() {
     };
   }, [user]);
 
-  // Gestionnaires de filtres (Les setState ici sont légitimes car déclenchés par des évènements utilisateur)
+  // Actions de sélection globale
+  const handleSelectAllCreatePerms = () => {
+    setCreatePermissions(availablePermissions.map((p) => p.code));
+  };
+
+  const handleDeselectAllCreatePerms = () => {
+    setCreatePermissions([]);
+  };
+
+  const handleSelectAllEditPerms = () => {
+    setSelectedPermissions(availablePermissions.map((p) => p.code));
+  };
+
+  const handleDeselectAllEditPerms = () => {
+    setSelectedPermissions([]);
+  };
+
+  // Gestionnaires de filtres
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setIsFetching(true);
     setSearch(e.target.value);
@@ -182,7 +210,10 @@ export default function UsersManagementPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          permissions: createPermissions,
+        }),
       });
 
       if (!res.ok) {
@@ -192,13 +223,14 @@ export default function UsersManagementPage() {
 
       setIsCreateOpen(false);
       setFormData({ firstName: '', lastName: '', email: '', password: '', role: 'AGENT' });
+      setCreatePermissions([]);
       refetchUsers();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Erreur réseau');
     }
   };
 
-  // Modification d'un utilisateur
+  // Modification des infos utilisateur
   const handleEditUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUser) return;
@@ -231,7 +263,7 @@ export default function UsersManagementPage() {
     }
   };
 
-  // Changement de statut Actif / Désactivé
+  // Activer / Désactiver un compte
   const handleToggleStatus = async (targetUser: User) => {
     const action = targetUser.isActive ? 'désactiver' : 'activer';
     if (!confirm(`Voulez-vous vraiment ${action} l'utilisateur ${targetUser.email} ?`)) return;
@@ -254,7 +286,7 @@ export default function UsersManagementPage() {
     }
   };
 
-  // Attribution Rôles et Permissions
+  // Sauvegarde des droits (Rôle + Permissions)
   const handleSaveRoleAndPermissions = async () => {
     if (!selectedUser) return;
 
@@ -301,6 +333,12 @@ export default function UsersManagementPage() {
     setIsRolePermOpen(true);
   };
 
+  const toggleCreatePermission = (code: string) => {
+    setCreatePermissions((prev) =>
+      prev.includes(code) ? prev.filter((p) => p !== code) : [...prev, code]
+    );
+  };
+
   const togglePermissionCheckbox = (code: string) => {
     setSelectedPermissions((prev) =>
       prev.includes(code) ? prev.filter((p) => p !== code) : [...prev, code]
@@ -310,7 +348,7 @@ export default function UsersManagementPage() {
   if (isLoading || (user && user.role !== 'SUPER_ADMIN')) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-gray-500 font-medium">Vérification des accès...</div>
+        <div className="text-gray-900 font-bold text-lg">Vérification des accès...</div>
       </div>
     );
   }
@@ -321,70 +359,63 @@ export default function UsersManagementPage() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <Link href="/dashboard" className="text-sm text-blue-600 hover:underline">
+            <Link href="/dashboard" className="text-sm text-blue-700 hover:underline font-bold">
               &larr; Retour au Dashboard
             </Link>
           </div>
-          <h1 className="text-2xl font-bold text-gray-800 mt-1">Gestion des Utilisateurs</h1>
-          <p className="text-gray-500 text-sm">
+          <h1 className="text-2xl font-black text-gray-900 mt-1">Gestion des Utilisateurs</h1>
+          <p className="text-gray-700 text-sm font-semibold">
             Espace pour administration des comptes, rôles et privilèges.
           </p>
         </div>
         <button
           onClick={() => {
             setFormData({ firstName: '', lastName: '', email: '', password: '', role: 'AGENT' });
+            setCreatePermissions([]);
             setIsCreateOpen(true);
           }}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md shadow transition-colors"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-md shadow transition-colors"
         >
           + Créer un Utilisateur
         </button>
       </div>
 
       {/* Barre de Recherche et Filtres */}
-      <div className="bg-white p-4 rounded-lg shadow mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="bg-white p-4 rounded-lg shadow border border-gray-300 mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
         <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1">Recherche</label>
+          <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Recherche</label>
           <input
             type="text"
             placeholder="Nom, Prénom ou Email..."
             value={search}
             onChange={handleSearchChange}
-            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
+            className={inputStyle}
           />
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1">Statut</label>
-          <select
-            value={statusFilter}
-            onChange={handleStatusFilterChange}
-            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
-          >
-            <option value="all">Tous les statuts</option>
-            <option value="active">Actif uniquement</option>
-            <option value="desactive">Désactivé uniquement</option>
+          <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Statut</label>
+          <select value={statusFilter} onChange={handleStatusFilterChange} className={selectStyle}>
+            <option value="all" className="text-gray-900 font-bold">Tous les statuts</option>
+            <option value="active" className="text-gray-900 font-bold">Actif uniquement</option>
+            <option value="desactive" className="text-gray-900 font-bold">Désactivé uniquement</option>
           </select>
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1">Rôle</label>
-          <select
-            value={roleFilter}
-            onChange={handleRoleFilterChange}
-            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
-          >
-            <option value="all">Tous les rôles</option>
-            <option value="SUPER_ADMIN">SUPER_ADMIN</option>
-            <option value="GERANT">GERANT</option>
-            <option value="AGENT">AGENT</option>
+          <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Rôle</label>
+          <select value={roleFilter} onChange={handleRoleFilterChange} className={selectStyle}>
+            <option value="all" className="text-gray-900 font-bold">Tous les rôles</option>
+            <option value="SUPER_ADMIN" className="text-gray-900 font-bold">SUPER_ADMIN</option>
+            <option value="GERANT" className="text-gray-900 font-bold">GERANT</option>
+            <option value="AGENT" className="text-gray-900 font-bold">AGENT</option>
           </select>
         </div>
 
         <div className="flex items-end">
           <button
             onClick={handleResetFilters}
-            className="w-full px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm rounded-md font-medium transition-colors"
+            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-900 text-sm rounded-md font-bold transition-colors border border-gray-300"
           >
             Réinitialiser
           </button>
@@ -393,14 +424,16 @@ export default function UsersManagementPage() {
 
       {/* Message d'erreur */}
       {error && (
-        <div className="p-4 mb-6 text-sm text-red-700 bg-red-100 rounded-lg">{error}</div>
+        <div className="p-4 mb-6 text-sm font-bold text-red-900 bg-red-100 border border-red-300 rounded-lg">
+          {error}
+        </div>
       )}
 
       {/* Tableau des Utilisateurs */}
-      <div className="bg-white rounded-lg shadow overflow-x-auto">
+      <div className="bg-white rounded-lg shadow border border-gray-300 overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="bg-gray-100 border-b text-xs text-gray-600 uppercase font-semibold">
+            <tr className="bg-gray-100 border-b border-gray-300 text-xs text-gray-900 uppercase font-black">
               <th className="p-4">Utilisateur</th>
               <th className="p-4">Email</th>
               <th className="p-4">Rôle</th>
@@ -408,34 +441,34 @@ export default function UsersManagementPage() {
               <th className="p-4 text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y text-sm text-gray-700">
+          <tbody className="divide-y divide-gray-200 text-sm text-gray-900 font-semibold">
             {isFetching ? (
               <tr>
-                <td colSpan={5} className="p-6 text-center text-gray-500">
+                <td colSpan={5} className="p-6 text-center text-gray-800 font-bold">
                   Chargement de la liste...
                 </td>
               </tr>
             ) : users.length === 0 ? (
               <tr>
-                <td colSpan={5} className="p-6 text-center text-gray-500">
+                <td colSpan={5} className="p-6 text-center text-gray-800 font-bold">
                   Aucun utilisateur trouvé.
                 </td>
               </tr>
             ) : (
               users.map((u) => (
-                <tr key={u.id} className="hover:bg-gray-50">
-                  <td className="p-4 font-medium text-gray-900">
+                <tr key={u.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="p-4 font-black text-gray-900">
                     {u.firstName || ''} {u.lastName || ''}
                   </td>
-                  <td className="p-4">{u.email}</td>
+                  <td className="p-4 text-gray-900 font-bold">{u.email}</td>
                   <td className="p-4">
                     <span
-                      className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                      className={`px-2 py-1 rounded-full text-xs font-black ${
                         u.role === 'SUPER_ADMIN'
-                          ? 'bg-purple-100 text-purple-800'
+                          ? 'bg-purple-100 text-purple-900 border border-purple-300'
                           : u.role === 'GERANT'
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-gray-100 text-gray-800'
+                          ? 'bg-blue-100 text-blue-900 border border-blue-300'
+                          : 'bg-gray-200 text-gray-900 border border-gray-400'
                       }`}
                     >
                       {u.role}
@@ -443,10 +476,10 @@ export default function UsersManagementPage() {
                   </td>
                   <td className="p-4">
                     <span
-                      className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                      className={`px-2 py-1 rounded-full text-xs font-black ${
                         u.isActive
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
+                          ? 'bg-green-100 text-green-900 border border-green-300'
+                          : 'bg-red-100 text-red-900 border border-red-300'
                       }`}
                     >
                       {u.isActive ? 'Actif' : 'Désactivé'}
@@ -455,21 +488,21 @@ export default function UsersManagementPage() {
                   <td className="p-4 text-right space-x-2">
                     <button
                       onClick={() => openEditModal(u)}
-                      className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium"
+                      className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-900 rounded text-xs font-bold border border-gray-300"
                     >
                       Éditer
                     </button>
                     <button
                       onClick={() => openRolePermModal(u)}
-                      className="px-3 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded text-xs font-medium"
+                      className="px-3 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-950 rounded text-xs font-bold border border-indigo-300"
                     >
                       Rôles & Permissions
                     </button>
                     <button
                       onClick={() => handleToggleStatus(u)}
-                      className={`px-3 py-1 rounded text-xs font-medium text-white ${
+                      className={`px-3 py-1 rounded text-xs font-bold text-white shadow-sm ${
                         u.isActive
-                          ? 'bg-red-500 hover:bg-red-600'
+                          ? 'bg-red-600 hover:bg-red-700'
                           : 'bg-green-600 hover:bg-green-700'
                       }`}
                     >
@@ -485,74 +518,89 @@ export default function UsersManagementPage() {
 
       {/* MODAL 1 : CRÉER UN UTILISATEUR */}
       {isCreateOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">Créer un Utilisateur</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 border border-gray-300">
+            <h2 className="text-lg font-black text-gray-900 mb-4">Créer un Utilisateur</h2>
             <form onSubmit={handleCreateUser} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Prénom</label>
+                <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Prénom</label>
                 <input
                   type="text"
                   required
                   value={formData.firstName}
                   onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputStyle}
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Nom</label>
+                <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Nom</label>
                 <input
                   type="text"
                   required
                   value={formData.lastName}
                   onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputStyle}
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Email</label>
+                <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Email</label>
                 <input
                   type="email"
                   required
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputStyle}
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Mot de passe</label>
+                <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Mot de passe</label>
                 <input
                   type="password"
                   required
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputStyle}
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Rôle Initial</label>
+                <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Rôle Initial</label>
                 <select
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={selectStyle}
                 >
-                  <option value="AGENT">AGENT</option>
-                  <option value="GERANT">GERANT</option>
-                  <option value="SUPER_ADMIN">SUPER_ADMIN</option>
+                  <option value="AGENT" className="text-gray-900 font-bold bg-white">AGENT</option>
+                  <option value="GERANT" className="text-gray-900 font-bold bg-white">GERANT</option>
+                  <option value="SUPER_ADMIN" className="text-gray-900 font-bold bg-white">SUPER_ADMIN</option>
                 </select>
+              </div>
+
+              {/* BOUTON DE SÉLECTION DES PERMISSIONS À LA CRÉATION */}
+              <div className="pt-2">
+                <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Permissions Initiales</label>
+                <button
+                  type="button"
+                  onClick={() => setIsCreatePermOpen(true)}
+                  className="w-full py-2 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-300 rounded-md text-sm font-bold flex justify-between items-center transition-colors"
+                >
+                  <span>⚙️ Configurer les permissions</span>
+                  <span className="bg-indigo-600 text-white text-xs px-2 py-0.5 rounded-full font-black">
+                    {createPermissions.length} choisie(s)
+                  </span>
+                </button>
               </div>
 
               <div className="flex justify-end gap-2 pt-4">
                 <button
                   type="button"
                   onClick={() => setIsCreateOpen(false)}
-                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm font-medium rounded-md"
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-900 text-sm font-bold rounded-md"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-md shadow"
                 >
                   Créer
                 </button>
@@ -562,40 +610,101 @@ export default function UsersManagementPage() {
         </div>
       )}
 
+      {/* MODAL 1B : SOUS-MODAL PERMISSIONS À LA CRÉATION */}
+      {isCreatePermOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full p-6 border border-gray-300">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-md font-black text-gray-900">Permissions à attribuer</h3>
+              <div className="space-x-2">
+                <button
+                  type="button"
+                  onClick={handleSelectAllCreatePerms}
+                  className="text-xs font-bold text-blue-700 hover:underline"
+                >
+                  Tout cocher
+                </button>
+                <span className="text-gray-400">|</span>
+                <button
+                  type="button"
+                  onClick={handleDeselectAllCreatePerms}
+                  className="text-xs font-bold text-gray-700 hover:underline"
+                >
+                  Tout décocher
+                </button>
+              </div>
+            </div>
+
+            {availablePermissions.length === 0 ? (
+              <p className="text-xs text-gray-700 font-bold">Aucune permission enregistrée en base.</p>
+            ) : (
+              <div className="space-y-2 border border-gray-300 p-3 rounded-md max-h-60 overflow-y-auto bg-gray-50">
+                {availablePermissions.map((perm) => (
+                  <label key={perm.id} className="flex items-center gap-2 cursor-pointer text-sm text-gray-900 font-bold hover:bg-gray-200 p-1.5 rounded transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={createPermissions.includes(perm.code)}
+                      onChange={() => toggleCreatePermission(perm.code)}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-gray-400 cursor-pointer"
+                    />
+                    <div>
+                      <span className="font-mono text-xs font-black bg-gray-200 text-gray-900 px-1.5 py-0.5 rounded mr-1.5 border border-gray-400">
+                        {perm.code}
+                      </span>
+                      <span className="text-xs text-gray-800 font-bold">{perm.description}</span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div className="flex justify-end pt-4">
+              <button
+                type="button"
+                onClick={() => setIsCreatePermOpen(false)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-md shadow"
+              >
+                Valider la sélection ({createPermissions.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL 2 : ÉDITER INFORMATIONS */}
       {isEditOpen && selectedUser && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">Modifier un Utilisateur</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 border border-gray-300">
+            <h2 className="text-lg font-black text-gray-900 mb-4">Modifier un Utilisateur</h2>
             <form onSubmit={handleEditUser} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Prénom</label>
+                <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Prénom</label>
                 <input
                   type="text"
                   required
                   value={formData.firstName}
                   onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputStyle}
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Nom</label>
+                <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Nom</label>
                 <input
                   type="text"
                   required
                   value={formData.lastName}
                   onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputStyle}
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Email</label>
+                <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Email</label>
                 <input
                   type="email"
                   required
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputStyle}
                 />
               </div>
 
@@ -603,13 +712,13 @@ export default function UsersManagementPage() {
                 <button
                   type="button"
                   onClick={() => setIsEditOpen(false)}
-                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm font-medium rounded-md"
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-900 text-sm font-bold rounded-md"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-md shadow"
                 >
                   Enregistrer
                 </button>
@@ -621,50 +730,70 @@ export default function UsersManagementPage() {
 
       {/* MODAL 3 : ATTRIBUTION RÔLES ET PERMISSIONS */}
       {isRolePermOpen && selectedUser && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-bold text-gray-800 mb-1">Attribution Rôle & Permissions</h2>
-            <p className="text-xs text-gray-500 mb-4">
-              Ajustement des droits pour <span className="font-semibold">{selectedUser.email}</span>
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6 border border-gray-300 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-black text-gray-900 mb-1">Attribution Rôle & Permissions</h2>
+            <p className="text-xs text-gray-800 font-semibold mb-4">
+              Ajustement des droits pour <span className="font-black text-gray-900">{selectedUser.email}</span>
             </p>
 
             <div className="space-y-6">
               {/* Choix du rôle */}
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-2">Rôle Principal</label>
+                <label className="block text-xs font-bold text-gray-900 uppercase mb-2">Rôle Principal</label>
                 <select
                   value={selectedRole}
                   onChange={(e) => setSelectedRole(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className={selectStyle}
                 >
-                  <option value="AGENT">AGENT</option>
-                  <option value="GERANT">GERANT</option>
-                  <option value="SUPER_ADMIN">SUPER_ADMIN</option>
+                  <option value="AGENT" className="text-gray-900 font-bold bg-white">AGENT</option>
+                  <option value="GERANT" className="text-gray-900 font-bold bg-white">GERANT</option>
+                  <option value="SUPER_ADMIN" className="text-gray-900 font-bold bg-white">SUPER_ADMIN</option>
                 </select>
               </div>
 
-              {/* Sélection fine des permissions */}
+              {/* Sélection fine des permissions avec "Tout cocher / Tout décocher" */}
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-2">
-                  Permissions Spécifiques
-                </label>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-xs font-bold text-gray-900 uppercase">
+                    Permissions Spécifiques
+                  </label>
+                  <div className="space-x-2">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllEditPerms}
+                      className="text-xs font-bold text-blue-700 hover:underline"
+                    >
+                      Tout cocher
+                    </button>
+                    <span className="text-gray-400">|</span>
+                    <button
+                      type="button"
+                      onClick={handleDeselectAllEditPerms}
+                      className="text-xs font-bold text-gray-700 hover:underline"
+                    >
+                      Tout décocher
+                    </button>
+                  </div>
+                </div>
+
                 {availablePermissions.length === 0 ? (
-                  <p className="text-xs text-gray-400">Aucune permission enregistrée en base.</p>
+                  <p className="text-xs text-gray-700 font-bold">Aucune permission enregistrée en base.</p>
                 ) : (
-                  <div className="space-y-2 border p-3 rounded-md max-h-48 overflow-y-auto">
+                  <div className="space-y-2 border border-gray-300 p-3 rounded-md max-h-48 overflow-y-auto bg-gray-50">
                     {availablePermissions.map((perm) => (
-                      <label key={perm.id} className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 hover:bg-gray-50 p-1 rounded">
+                      <label key={perm.id} className="flex items-center gap-2 cursor-pointer text-sm text-gray-900 font-bold hover:bg-gray-200 p-1.5 rounded transition-colors">
                         <input
                           type="checkbox"
                           checked={selectedPermissions.includes(perm.code)}
                           onChange={() => togglePermissionCheckbox(perm.code)}
-                          className="rounded text-indigo-600 focus:ring-indigo-500"
+                          className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-gray-400 cursor-pointer"
                         />
                         <div>
-                          <span className="font-mono text-xs font-semibold bg-gray-100 px-1 py-0.5 rounded mr-1">
+                          <span className="font-mono text-xs font-black bg-gray-200 text-gray-900 px-1.5 py-0.5 rounded mr-1.5 border border-gray-400">
                             {perm.code}
                           </span>
-                          <span className="text-xs text-gray-500">{perm.description}</span>
+                          <span className="text-xs text-gray-800 font-bold">{perm.description}</span>
                         </div>
                       </label>
                     ))}
@@ -677,14 +806,14 @@ export default function UsersManagementPage() {
               <button
                 type="button"
                 onClick={() => setIsRolePermOpen(false)}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm font-medium rounded-md"
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-900 text-sm font-bold rounded-md"
               >
                 Annuler
               </button>
               <button
                 type="button"
                 onClick={handleSaveRoleAndPermissions}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md"
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-md shadow"
               >
                 Sauvegarder les droits
               </button>

@@ -102,23 +102,25 @@ export class UsersService {
    * Création d'un nouvel utilisateur
    */
   async create(dto: CreateUserDto) {
-    const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
-    });
-    if (existing) {
-      throw new ConflictException('Un utilisateur avec cet email existe déjà.');
-    }
+  const existing = await this.prisma.user.findUnique({
+    where: { email: dto.email.toLowerCase() },
+  });
+  if (existing) {
+    throw new ConflictException('Un utilisateur avec cet email existe déjà.');
+  }
 
-    const roleObj = await this.prisma.role.findUnique({
-      where: { name: dto.role },
-    });
-    if (!roleObj) {
-      throw new BadRequestException(`Le rôle '${dto.role}' n'existe pas.`);
-    }
+  const roleObj = await this.prisma.role.findUnique({
+    where: { name: dto.role },
+  });
+  if (!roleObj) {
+    throw new BadRequestException(`Le rôle '${dto.role}' n'existe pas.`);
+  }
 
-    const hashedPassword = await bcrypt.hash(dto.password, 10);
+  const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-    return this.prisma.user.create({
+  return this.prisma.$transaction(async (tx) => {
+    // 1. Création de l'utilisateur
+    const newUser = await tx.user.create({
       data: {
         firstName: dto.firstName,
         lastName: dto.lastName,
@@ -126,9 +128,32 @@ export class UsersService {
         password: hashedPassword,
         roleId: roleObj.id,
       },
-      select: { id: true, email: true, firstName: true, lastName: true },
     });
-  }
+
+    // 2. Attribution directe des permissions si fournies à la création
+    if (Array.isArray(dto.permissions) && dto.permissions.length > 0) {
+      const permsInDb = await tx.permission.findMany({
+        where: { code: { in: dto.permissions } },
+      });
+
+      if (permsInDb.length > 0) {
+        await tx.userPermission.createMany({
+          data: permsInDb.map((p) => ({
+            userId: newUser.id,
+            permissionId: p.id,
+          })),
+        });
+      }
+    }
+
+    return {
+      id: newUser.id,
+      email: newUser.email,
+      firstName: newUser.firstName,
+      lastName: newUser.lastName,
+    };
+  });
+}
 
   /**
    * Mise à jour des informations de base
