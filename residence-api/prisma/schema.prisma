@@ -73,6 +73,7 @@ model Residence {
   address       String?
   pricePerNight Decimal  @db.Decimal(10, 2)
   isAvailable   Boolean  @default(true)
+  isActive      Boolean  @default(true) // <-- Ajouté pour la désactivation d'audit
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
