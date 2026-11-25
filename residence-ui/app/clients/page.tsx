@@ -179,11 +179,13 @@ export default function ClientsPage() {
         <div>
           <Link
             href="/dashboard"
-            className="text-sm text-blue-400 hover:text-blue-300 font-medium inline-flex items-center gap-1 mb-1"
-          >
+            className="text-sm text-blue-700 hover:underline font-bold">
             ← Retour au Tableau de bord
           </Link>
-          <h1 className="text-2xl font-bold text-white">Gestion des Clients</h1>
+          <h1 className="text-2xl font-black text-gray-900 mt-1">Gestion des Clients</h1>
+          <p className="text-gray-700 text-sm font-semibold">
+            Consultation, ajout, modification et désactivation.
+          </p>
         </div>
 
         <button

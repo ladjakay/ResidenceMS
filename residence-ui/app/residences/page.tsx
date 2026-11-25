@@ -205,11 +205,11 @@ export default function ResidencesPage() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <div>
           <Link href="/dashboard" className="text-sm text-blue-700 hover:underline font-bold">
-            &larr; Retour au Dashboard
+            &larr; Retour au Tableau de bord
           </Link>
           <h1 className="text-2xl font-black text-gray-900 mt-1">Gestion des Résidences</h1>
           <p className="text-gray-700 text-sm font-semibold">
-            Consultation, ajout, modification et désactivation (traçabilité d&apos;audit).
+            Consultation, ajout, modification et désactivation.
           </p>
         </div>
 

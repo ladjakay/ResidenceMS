@@ -378,6 +378,9 @@ export default function BookingsPage() {
           <h1 className="text-2xl font-black text-gray-900">
             Gestion des Réservations
           </h1>
+          <p className="text-gray-700 text-sm font-semibold">
+            Consultation, ajout, modification et désactivation.
+          </p>
         </div>
 
         <div className="flex items-center gap-3">

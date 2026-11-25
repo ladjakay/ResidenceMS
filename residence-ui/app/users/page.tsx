@@ -360,7 +360,7 @@ export default function UsersManagementPage() {
         <div>
           <div className="flex items-center gap-2">
             <Link href="/dashboard" className="text-sm text-blue-700 hover:underline font-bold">
-              &larr; Retour au Dashboard
+              &larr; Retour au Tableau de bord
             </Link>
           </div>
           <h1 className="text-2xl font-black text-gray-900 mt-1">Gestion des Utilisateurs</h1>

@@ -58,22 +58,4 @@ export class ResidencesController {
   toggleStatus(@Param('id') id: string, @Body('isActive') isActive: boolean) {
     return this.residencesService.toggleActive(id, Boolean(isActive));
   }
-
-  // 1. Route accessible aux Agents, Gérants et Super Admin
-  @Post('reservations')
-  @RequirePermissions('booking:create')
-  createBooking(@Body() bookingDto: any) {
-    return { message: 'Réservation créée avec succès !' };
-  }
-
-  // 2. Route financière réservée EXCLUSIVEMENT aux Gérants et Super Admin
-  @Get('finances/chiffre-affaires')
-  @RequirePermissions('finance:view')
-  getRevenueReport() {
-    return {
-      residence: 'Résidence Fleurie - Abidjan',
-      chiffreAffairesXOF: 4500000,
-      periode: 'Octobre 2026',
-    };
-  }
 }
