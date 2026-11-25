@@ -1,7 +1,7 @@
 // residence-ui/app/clients/page.tsx
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 
 export interface Client {
@@ -23,6 +23,10 @@ export default function ClientsPage() {
   // Filtres
   const [search, setSearch] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
 
   // États des modales (Création / Édition)
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -79,6 +83,32 @@ export default function ClientsPage() {
 
     return () => clearTimeout(timer);
   }, [fetchClients]);
+
+  // Résumé calculé sur les clients retournés
+  const summaryStats = useMemo(() => {
+    const totalCount = clients.length;
+    const activeCount = clients.filter((c) => c.isActive).length;
+    const inactiveCount = totalCount - activeCount;
+    const totalBookings = clients.reduce(
+      (acc, c) => acc + (Number(c._count?.bookings) || 0),
+      0,
+    );
+
+    return {
+      totalCount,
+      activeCount,
+      inactiveCount,
+      totalBookings,
+    };
+  }, [clients]);
+
+  // Découpage paginé
+  const totalPages = Math.ceil(clients.length / pageSize) || 1;
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const paginatedClients = useMemo(() => {
+    const start = (safeCurrentPage - 1) * pageSize;
+    return clients.slice(start, start + pageSize);
+  }, [clients, safeCurrentPage, pageSize]);
 
   const handleOpenCreateModal = () => {
     setEditingClient(null);
@@ -189,6 +219,7 @@ export default function ClientsPage() {
         </div>
 
         <button
+          type="button"
           onClick={handleOpenCreateModal}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition"
         >
@@ -202,55 +233,104 @@ export default function ClientsPage() {
         </div>
       )}
 
-      {/* Barre de Filtres */}
-      <div className="bg-white p-4 rounded-xl shadow-md border border-gray-200 space-y-3">
-        <h2 className="text-xs font-bold text-gray-800 uppercase tracking-wider">
-          Filtres de recherche
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">
-              Rechercher par nom / prénom / téléphone
-            </label>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Ex: Remy, Amidou, 0707..."
-              className="w-full border border-gray-300 rounded-lg p-2 text-xs font-semibold text-gray-900 bg-white placeholder-gray-400 focus:ring-2 focus:ring-blue-600 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">Statut</label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg p-2 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-blue-600 focus:outline-none"
-            >
-              <option value="">Tous les statuts</option>
-              <option value="active">Actif</option>
-              <option value="desactive">Désactivé</option>
-            </select>
-          </div>
-
-          {(search || statusFilter) && (
-            <div className="flex items-end">
-              <button
-                onClick={() => {
-                  setSearch('');
-                  setStatusFilter('');
+      {/* Barre de Filtres + Résumé */}
+      <div className="bg-white p-4 rounded-xl shadow-md border border-gray-200 space-y-4">
+        <div className="space-y-3">
+          <h2 className="text-xs font-bold text-gray-800 uppercase tracking-wider">
+            Filtres de recherche
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">
+                Rechercher par nom / prénom / téléphone
+              </label>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setCurrentPage(1);
                 }}
-                className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline pb-2"
-              >
-                Réinitialiser les filtres
-              </button>
+                placeholder="Ex: Remy, Amidou, 0707..."
+                className="w-full border border-gray-300 rounded-lg p-2 text-xs font-semibold text-gray-900 bg-white placeholder-gray-400 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+              />
             </div>
-          )}
+
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">Statut</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-full border border-gray-300 rounded-lg p-2 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-blue-600 focus:outline-none"
+              >
+                <option value="">Tous les statuts</option>
+                <option value="active">Actif</option>
+                <option value="desactive">Désactivé</option>
+              </select>
+            </div>
+
+            {(search || statusFilter) && (
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch('');
+                    setStatusFilter('');
+                    setCurrentPage(1);
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline pb-2"
+                >
+                  Réinitialiser les filtres
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Résumé en bas de la zone des critères */}
+        <div className="pt-3 border-t border-gray-200 grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <span className="block text-[11px] font-black text-blue-800 uppercase tracking-wider">
+              Clients trouvés
+            </span>
+            <span className="text-lg font-black text-blue-900">
+              {summaryStats.totalCount}
+            </span>
+          </div>
+
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+            <span className="block text-[11px] font-black text-emerald-800 uppercase tracking-wider">
+              Actifs
+            </span>
+            <span className="text-lg font-black text-emerald-900">
+              {summaryStats.activeCount}
+            </span>
+          </div>
+
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+            <span className="block text-[11px] font-black text-red-800 uppercase tracking-wider">
+              Désactivés
+            </span>
+            <span className="text-lg font-black text-red-900">
+              {summaryStats.inactiveCount}
+            </span>
+          </div>
+
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+            <span className="block text-[11px] font-black text-purple-800 uppercase tracking-wider">
+              Cumul Réservations
+            </span>
+            <span className="text-lg font-black text-purple-900">
+              {summaryStats.totalBookings}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Tableau des Clients */}
+      {/* Tableau des Clients paginé */}
       {loading ? (
         <div className="p-8 text-center text-gray-300">Chargement des clients...</div>
       ) : clients.length === 0 ? (
@@ -258,62 +338,113 @@ export default function ClientsPage() {
           Aucun client trouvé.
         </div>
       ) : (
-        <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b bg-gray-50 text-xs font-bold text-gray-700 uppercase">
-                <th className="p-3">Nom & Prénom</th>
-                <th className="p-3">Téléphone</th>
-                <th className="p-3">Email</th>
-                <th className="p-3">Réservations</th>
-                <th className="p-3">Statut</th>
-                <th className="p-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 text-sm">
-              {clients.map((client) => (
-                <tr key={client.id} className="hover:bg-gray-50">
-                  <td className="p-3 font-semibold text-gray-900">
-                    {client.lastName.toUpperCase()} {client.firstName}
-                  </td>
-                  <td className="p-3 text-gray-700 font-medium">{client.phone}</td>
-                  <td className="p-3 text-gray-600">{client.email || 'N/A'}</td>
-                  <td className="p-3 text-gray-700 font-semibold">
-                    {client._count?.bookings ?? 0}
-                  </td>
-                  <td className="p-3">
-                    <span
-                      className={`px-2.5 py-1 text-xs font-semibold rounded-full ${
-                        client.isActive
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {client.isActive ? 'Actif' : 'Désactivé'}
-                    </span>
-                  </td>
-                  <td className="p-3 text-right space-x-2">
-                    <button
-                      onClick={() => handleOpenEditModal(client)}
-                      className="px-2.5 py-1 text-xs font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 rounded border border-amber-200 transition"
-                    >
-                      Éditer
-                    </button>
-                    <button
-                      onClick={() => handleToggleStatus(client)}
-                      className={`px-2.5 py-1 text-xs font-medium rounded border transition ${
-                        client.isActive
-                          ? 'bg-red-50 text-red-700 hover:bg-red-100 border-red-200'
-                          : 'bg-green-50 text-green-700 hover:bg-green-100 border-green-200'
-                      }`}
-                    >
-                      {client.isActive ? 'Désactiver' : 'Réactiver'}
-                    </button>
-                  </td>
+        <div className="space-y-4">
+          <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b bg-gray-50 text-xs font-bold text-gray-700 uppercase">
+                  <th className="p-3">Nom & Prénom</th>
+                  <th className="p-3">Téléphone</th>
+                  <th className="p-3">Email</th>
+                  <th className="p-3">Réservations</th>
+                  <th className="p-3">Statut</th>
+                  <th className="p-3 text-right">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-200 text-sm">
+                {paginatedClients.map((client) => (
+                  <tr key={client.id} className="hover:bg-gray-50">
+                    <td className="p-3 font-semibold text-gray-900">
+                      {client.lastName.toUpperCase()} {client.firstName}
+                    </td>
+                    <td className="p-3 text-gray-700 font-medium">{client.phone}</td>
+                    <td className="p-3 text-gray-600">{client.email || 'N/A'}</td>
+                    <td className="p-3 text-gray-700 font-semibold">
+                      {client._count?.bookings ?? 0}
+                    </td>
+                    <td className="p-3">
+                      <span
+                        className={`px-2.5 py-1 text-xs font-semibold rounded-full ${
+                          client.isActive
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}
+                      >
+                        {client.isActive ? 'Actif' : 'Désactivé'}
+                      </span>
+                    </td>
+                    <td className="p-3 text-right space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditModal(client)}
+                        className="px-2.5 py-1 text-xs font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 rounded border border-amber-200 transition"
+                      >
+                        Éditer
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStatus(client)}
+                        className={`px-2.5 py-1 text-xs font-medium rounded border transition ${
+                          client.isActive
+                            ? 'bg-red-50 text-red-700 hover:bg-red-100 border-red-200'
+                            : 'bg-green-50 text-green-700 hover:bg-green-100 border-green-200'
+                        }`}
+                      >
+                        {client.isActive ? 'Désactiver' : 'Réactiver'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Contrôles de pagination */}
+          <div className="bg-white border border-gray-200 rounded-lg p-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-bold text-gray-800 shadow-sm">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span>Afficher</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="border border-gray-300 rounded px-2 py-1 bg-white text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-600 cursor-pointer"
+              >
+                <option value={10}>10 par page</option>
+                <option value={20}>20 par page</option>
+                <option value={50}>50 par page</option>
+              </select>
+              <span className="text-gray-600">
+                (Affichage de {(safeCurrentPage - 1) * pageSize + 1} à{' '}
+                {Math.min(safeCurrentPage * pageSize, clients.length)} sur {clients.length})
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={safeCurrentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="px-3 py-1.5 border border-gray-300 rounded bg-gray-50 hover:bg-gray-100 text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Précédent
+              </button>
+
+              <span>
+                Page {safeCurrentPage} / {totalPages}
+              </span>
+
+              <button
+                type="button"
+                disabled={safeCurrentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="px-3 py-1.5 border border-gray-300 rounded bg-gray-50 hover:bg-gray-100 text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Suivant
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

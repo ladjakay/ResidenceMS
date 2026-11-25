@@ -1,951 +1,955 @@
-// residence-ui/app/finances/page.tsx
+// app/finances/page.tsx
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { ApiClientError, apiRequest } from '@/lib/api.service';
 
-interface BookingDetail {
+interface ResidenceRow {
   id: string;
-  createdAt: string;
-  checkIn: string;
-  checkOut: string;
-  status: string;
-  clientName: string;
-  paidAmount: number;
-  totalAmount: number;
-  remainingAmount: number;
+  name: string;
+  address?: string;
+  pricePerNight?: number;
+  isAvailable?: boolean;
 }
 
-interface ResidenceFinanceItem {
-  residenceId: string;
-  residenceName: string;
-  isActive: boolean;
+interface BookingRow {
+  id: string;
+  residenceId?: string;
+  residence?: { id: string; name?: string };
+  totalAmount?: number | string;
+  paidAmount?: number | string;
+  status?: string;
+  checkIn?: string;
+  createdAt?: string;
+}
+
+interface ResidencePerformance {
+  id: string;
+  name: string;
+  address: string;
   bookingsCount: number;
-  activeBookingsCount: number;
-  cancelledBookingsCount: number;
-  actualRevenue: number;
-  projectedRevenue: number;
-  remainingBalance: number;
-  bookings: BookingDetail[];
+  collectedAmount: number;
+  expectedAmount: number;
+  outstandingAmount: number;
+  collectionRate: number;
 }
 
-interface FinanceReportResponse {
-  residences: ResidenceFinanceItem[];
-  totals: {
-    bookingsCount: number;
-    actualRevenue: number;
-    projectedRevenue: number;
-    remainingBalance: number;
-  };
+type PeriodPreset = 'all' | '7d' | '30d' | 'month' | 'custom';
+
+type SortKey =
+  | 'collectedAmount'
+  | 'expectedAmount'
+  | 'collectionRate'
+  | 'bookingsCount'
+  | 'name';
+
+function formatFcfa(amount: number): string {
+  return `${Math.round(amount).toLocaleString('fr-FR')} FCFA`;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+function escapeCsvCell(value: string | number): string {
+  const str = String(value ?? '');
+  const escaped = str.replace(/"/g, '""');
+  return `"${escaped}"`;
+}
+
+function extractArray<T>(payload: unknown, keys: string[]): T[] {
+  if (Array.isArray(payload)) return payload as T[];
+  if (typeof payload === 'object' && payload !== null) {
+    const obj = payload as Record<string, unknown>;
+    for (const key of keys) {
+      if (Array.isArray(obj[key])) {
+        return obj[key] as T[];
+      }
+    }
+    if (typeof obj.data === 'object' && obj.data !== null) {
+      const nested = obj.data as Record<string, unknown>;
+      for (const key of keys) {
+        if (Array.isArray(nested[key])) {
+          return nested[key] as T[];
+        }
+      }
+    }
+  }
+  return [];
+}
+
+function parseBookingDate(booking: BookingRow): Date | null {
+  const raw = booking.checkIn || booking.createdAt;
+  if (!raw) return null;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 export default function FinancesPage() {
-  const { user, hasPermission, isLoading } = useAuth();
+  const { user, hasPermission, isLoading: authLoading } = useAuth();
   const router = useRouter();
 
-  const [report, setReport] = useState<FinanceReportResponse | null>(null);
-  const [allResidencesOptions, setAllResidencesOptions] = useState<
-    { id: string; name: string }[]
-  >([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [residences, setResidences] = useState<ResidenceRow[]>([]);
+  const [bookings, setBookings] = useState<BookingRow[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Filtres dynamiques
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [selectedResidenceId, setSelectedResidenceId] = useState('ALL');
-  const [groupBy, setGroupBy] = useState<'residence' | 'day'>('residence');
+  // Période sélectionnée
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
+  const [startDateInput, setStartDateInput] = useState('');
+  const [endDateInput, setEndDateInput] = useState('');
 
-  // Comparaison de 3 résidences maximum
-  const [comparedIds, setComparedIds] = useState<string[]>([]);
+  // Filtres, tri & pagination du tableau global
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('collectedAmount');
+  const [sortDesc, setSortDesc] = useState(true);
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
 
-  const inputStyle =
-    'w-full border border-gray-300 rounded-lg p-2 text-xs font-bold text-gray-900 bg-white focus:ring-2 focus:ring-blue-600 focus:outline-none';
+  // null = Top 3 par défaut ; sinon liste personnalisée
+  const [customCompareIds, setCustomCompareIds] = useState<string[] | null>(
+    null,
+  );
 
-  const selectStyle =
-    'w-full border border-gray-300 rounded-lg p-2 text-xs font-bold text-gray-900 bg-white focus:ring-2 focus:ring-blue-600 focus:outline-none cursor-pointer';
-
-  const getToken = () =>
-    localStorage.getItem('token') ||
-    localStorage.getItem('access_token') ||
-    localStorage.getItem('accessToken');
+  const canAccessFinances =
+    user?.role === 'SUPER_ADMIN' || hasPermission('finance:view');
 
   useEffect(() => {
-    if (!isLoading) {
-      if (!user) {
-        router.push('/login');
-      } else if (user.role !== 'SUPER_ADMIN' && !hasPermission('finance:view')) {
-        router.push('/dashboard');
-      }
+    if (!authLoading && !user) {
+      router.push('/login');
     }
-  }, [user, hasPermission, isLoading, router]);
+  }, [authLoading, user, router]);
 
-  // Charge la liste complète des résidences pour les filtres et le comparateur (3 max)
-  useEffect(() => {
-    if (!user) return;
-    let isMounted = true;
+  const fetchFinanceSources = useCallback(async () => {
+    const [resList, bookList] = await Promise.allSettled([
+      apiRequest<unknown>('/residences'),
+      apiRequest<unknown>('/bookings'),
+    ]);
 
-    async function loadResidencesOptions() {
-      try {
-        const token = getToken();
-        const r = await fetch('http://localhost:3000/residences', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!r.ok) return;
-        const data = await r.json();
-        const list = Array.isArray(data) ? data : data.data || [];
-        const opts = list.map((item: { id: string; name: string }) => ({
-          id: item.id,
-          name: item.name,
-        }));
-        if (isMounted) {
-          setAllResidencesOptions(opts);
-          setComparedIds((prev) =>
-            prev.length > 0 ? prev : opts.slice(0, 3).map((o: { id: string }) => o.id),
-          );
-        }
-      } catch {
-        // Ignoré si non disponible
-      }
+    const parsedResidences =
+      resList.status === 'fulfilled'
+        ? extractArray<ResidenceRow>(resList.value, ['residences', 'data'])
+        : [];
+    const parsedBookings =
+      bookList.status === 'fulfilled'
+        ? extractArray<BookingRow>(bookList.value, ['bookings', 'data'])
+        : [];
+
+    let error: string | null = null;
+    if (resList.status === 'rejected' && bookList.status === 'rejected') {
+      const firstErr = resList.reason;
+      error =
+        firstErr instanceof ApiClientError
+          ? firstErr.message
+          : 'Impossible de charger les données financières.';
     }
 
-    void loadResidencesOptions();
+    return { parsedResidences, parsedBookings, error };
+  }, []);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [user]);
+  const handleManualRefresh = useCallback(async () => {
+    setLoadingData(true);
+    setErrorMsg(null);
+    try {
+      const { parsedResidences, parsedBookings, error } =
+        await fetchFinanceSources();
+      setResidences(parsedResidences);
+      setBookings(parsedBookings);
+      setErrorMsg(error);
+    } catch (err: unknown) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : 'Erreur lors du chargement du rapport financier.',
+      );
+    } finally {
+      setLoadingData(false);
+    }
+  }, [fetchFinanceSources]);
 
-  // Chargement asynchrone du rapport financier sans appel synchrone de setState dans l'effet
   useEffect(() => {
-    if (!user) return;
-    if (user.role !== 'SUPER_ADMIN' && !hasPermission('finance:view')) return;
+    if (authLoading || !user || !canAccessFinances) {
+      return;
+    }
 
-    let isMounted = true;
+    let active = true;
 
-    async function loadReport() {
-      if (isMounted) {
-        setLoading(true);
-        setError(null);
-      }
-
-      try {
-        const token = getToken();
-        const params = new URLSearchParams();
-        if (startDate) params.append('startDate', startDate);
-        if (endDate) params.append('endDate', endDate);
-        if (selectedResidenceId && selectedResidenceId !== 'ALL') {
-          params.append('residenceId', selectedResidenceId);
-        }
-
-        const res = await fetch(
-          `http://localhost:3000/finances/report?${params.toString()}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          },
+    Promise.resolve()
+      .then(() => {
+        if (!active) return null;
+        setLoadingData(true);
+        setErrorMsg(null);
+        return fetchFinanceSources();
+      })
+      .then((result) => {
+        if (!active || !result) return;
+        setResidences(result.parsedResidences);
+        setBookings(result.parsedBookings);
+        setErrorMsg(result.error);
+      })
+      .catch((err: unknown) => {
+        if (!active) return;
+        setErrorMsg(
+          err instanceof Error
+            ? err.message
+            : 'Erreur lors du chargement du rapport financier.',
         );
-
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(
-            errData.message || 'Erreur lors du chargement du rapport financier.',
-          );
+      })
+      .finally(() => {
+        if (active) {
+          setLoadingData(false);
         }
-
-        const data: FinanceReportResponse = await res.json();
-        if (isMounted) {
-          setReport(data);
-        }
-      } catch (err: unknown) {
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : 'Erreur de chargement');
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void loadReport();
+      });
 
     return () => {
-      isMounted = false;
+      active = false;
     };
-  }, [user, hasPermission, startDate, endDate, selectedResidenceId]);
+  }, [authLoading, user, canAccessFinances, fetchFinanceSources]);
 
-  // Données du graphique (par résidence ou par jour)
-  const chartSeries = useMemo(() => {
-    if (!report) return [];
+  // Filtrage des réservations selon la période choisie
+  const periodBookings = useMemo(() => {
+    if (periodPreset === 'all') return bookings;
 
-    if (groupBy === 'residence') {
-      return report.residences.map((r) => ({
-        key: r.residenceId,
-        label: r.residenceName,
-        actualRevenue: r.actualRevenue,
-        projectedRevenue: r.projectedRevenue,
-        bookingsCount: r.bookingsCount,
-      }));
+    const now = new Date();
+    let start: Date | null = null;
+    let end: Date | null = null;
+
+    if (periodPreset === '7d') {
+      start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    } else if (periodPreset === '30d') {
+      start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    } else if (periodPreset === 'month') {
+      start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    } else if (periodPreset === 'custom') {
+      if (startDateInput) {
+        const s = new Date(`${startDateInput}T00:00:00`);
+        if (!Number.isNaN(s.getTime())) start = s;
+      }
+      if (endDateInput) {
+        const e = new Date(`${endDateInput}T23:59:59.999`);
+        if (!Number.isNaN(e.getTime())) end = e;
+      }
     }
 
-    const dayMap = new Map<
-      string,
-      {
-        key: string;
-        label: string;
-        actualRevenue: number;
-        projectedRevenue: number;
-        bookingsCount: number;
-      }
-    >();
-
-    report.residences.forEach((r) => {
-      r.bookings.forEach((b) => {
-        const dayKey = new Date(b.checkIn).toISOString().slice(0, 10);
-        const current = dayMap.get(dayKey) || {
-          key: dayKey,
-          label: new Date(b.checkIn).toLocaleDateString('fr-FR'),
-          actualRevenue: 0,
-          projectedRevenue: 0,
-          bookingsCount: 0,
-        };
-        current.bookingsCount += 1;
-        if (b.status !== 'CANCELLED' && b.status !== 'REFUNDED') {
-          current.actualRevenue += Number(b.paidAmount) || 0;
-          current.projectedRevenue += Number(b.totalAmount) || 0;
-        }
-        dayMap.set(dayKey, current);
-      });
+    return bookings.filter((b) => {
+      const bDate = parseBookingDate(b);
+      if (!bDate) return true;
+      if (start && bDate < start) return false;
+      if (end && bDate > end) return false;
+      return true;
     });
+  }, [bookings, periodPreset, startDateInput, endDateInput]);
 
-    return Array.from(dayMap.values()).sort((a, b) => a.key.localeCompare(b.key));
-  }, [report, groupBy]);
+  const periodLabel = useMemo(() => {
+    switch (periodPreset) {
+      case '7d':
+        return '7 derniers jours';
+      case '30d':
+        return '30 derniers jours';
+      case 'month':
+        return 'Mois en cours';
+      case 'custom': {
+        const from = startDateInput || 'Début';
+        const to = endDateInput || "Aujourd'hui";
+        return `Du ${from} au ${to}`;
+      }
+      default:
+        return 'Toutes périodes';
+    }
+  }, [periodPreset, startDateInput, endDateInput]);
 
-  const maxAmount = useMemo(() => {
-    const vals = chartSeries.map((d) => Math.max(d.actualRevenue, d.projectedRevenue));
-    return Math.max(1, ...vals);
-  }, [chartSeries]);
+  // Agrégation par résidence sur la période sélectionnée
+  const performances = useMemo<ResidencePerformance[]>(() => {
+    const map = new Map<string, ResidencePerformance>();
 
-  const maxBookings = useMemo(() => {
-    return Math.max(1, ...chartSeries.map((d) => d.bookingsCount));
-  }, [chartSeries]);
+    for (const r of residences) {
+      map.set(r.id, {
+        id: r.id,
+        name: r.name,
+        address: r.address || 'Adresse non renseignée',
+        bookingsCount: 0,
+        collectedAmount: 0,
+        expectedAmount: 0,
+        outstandingAmount: 0,
+        collectionRate: 0,
+      });
+    }
 
-  // Gestion de la sélection de 3 résidences maximum pour comparaison
+    for (const b of periodBookings) {
+      if (b.status === 'CANCELLED') continue;
+      const resId = b.residenceId || b.residence?.id;
+      if (!resId) continue;
+
+      const existing = map.get(resId) ?? {
+        id: resId,
+        name: b.residence?.name || `Résidence ${resId.slice(0, 6)}`,
+        address: 'Adresse non renseignée',
+        bookingsCount: 0,
+        collectedAmount: 0,
+        expectedAmount: 0,
+        outstandingAmount: 0,
+        collectionRate: 0,
+      };
+
+      const total = Number(b.totalAmount ?? 0);
+      const paid = Number(b.paidAmount ?? 0);
+
+      existing.bookingsCount += 1;
+      existing.expectedAmount += total;
+      existing.collectedAmount += paid;
+      map.set(resId, existing);
+    }
+
+    return Array.from(map.values()).map((item) => {
+      const outstanding = Math.max(0, item.expectedAmount - item.collectedAmount);
+      const rate =
+        item.expectedAmount > 0
+          ? Math.min(
+              100,
+              Math.round((item.collectedAmount / item.expectedAmount) * 100),
+            )
+          : 0;
+
+      return {
+        ...item,
+        outstandingAmount: outstanding,
+        collectionRate: rate,
+      };
+    });
+  }, [residences, periodBookings]);
+
+  const defaultTop3Ids = useMemo(
+    () =>
+      [...performances]
+        .sort((a, b) => b.collectedAmount - a.collectedAmount)
+        .slice(0, 3)
+        .map((p) => p.id),
+    [performances],
+  );
+
+  const selectedCompareIds = customCompareIds ?? defaultTop3Ids;
+
+  const kpis = useMemo(() => {
+    const totalCollected = performances.reduce(
+      (acc, p) => acc + p.collectedAmount,
+      0,
+    );
+    const totalExpected = performances.reduce(
+      (acc, p) => acc + p.expectedAmount,
+      0,
+    );
+    const totalOutstanding = Math.max(0, totalExpected - totalCollected);
+    const globalRate =
+      totalExpected > 0
+        ? Math.min(100, Math.round((totalCollected / totalExpected) * 100))
+        : 0;
+
+    return {
+      totalCollected,
+      totalExpected,
+      totalOutstanding,
+      globalRate,
+    };
+  }, [performances]);
+
   const toggleCompareResidence = (id: string) => {
-    setComparedIds((prev) => {
-      if (prev.includes(id)) {
-        return prev.filter((item) => item !== id);
+    setCustomCompareIds((prev) => {
+      const current = prev ?? defaultTop3Ids;
+      if (current.includes(id)) {
+        return current.filter((item) => item !== id);
       }
-      if (prev.length >= 3) {
-        alert('Vous pouvez comparer au maximum 3 résidences à la fois.');
-        return prev;
+      if (current.length >= 4) {
+        return [...current.slice(1), id];
       }
-      return [...prev, id];
+      return [...current, id];
     });
   };
 
-  const comparedItems = useMemo(() => {
-    if (!report) return [];
-    return report.residences.filter((r) => comparedIds.includes(r.residenceId));
-  }, [report, comparedIds]);
+  const selectTop3 = () => {
+    setCustomCompareIds(defaultTop3Ids);
+  };
 
-  // Téléchargement du rapport détaillé (CSV UTF-8 avec BOM pour Excel)
-  const handleDownloadDetailedCsv = () => {
-    if (!report) return;
+  const comparedItems = useMemo(
+    () =>
+      performances.filter((item) => selectedCompareIds.includes(item.id)),
+    [performances, selectedCompareIds],
+  );
 
-    const rows: string[] = [
-      [
-        'Résidence',
-        'Date Réservation',
-        'Client',
-        'Arrivée',
-        'Départ',
-        'Statut',
-        'Acompte / Payé (FCFA)',
-        'Montant Total (FCFA)',
-        'Reste à Payer (FCFA)',
-      ].join(';'),
+  const maxComparedValue = useMemo(() => {
+    const maxVal = comparedItems.reduce(
+      (max, item) => Math.max(max, item.expectedAmount, item.collectedAmount),
+      0,
+    );
+    return maxVal > 0 ? maxVal : 1;
+  }, [comparedItems]);
+
+  const filteredAndSorted = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const filtered = q
+      ? performances.filter(
+          (p) =>
+            p.name.toLowerCase().includes(q) ||
+            p.address.toLowerCase().includes(q),
+        )
+      : performances;
+
+    return [...filtered].sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === 'name') {
+        cmp = a.name.localeCompare(b.name, 'fr');
+      } else {
+        cmp = a[sortKey] - b[sortKey];
+      }
+      return sortDesc ? -cmp : cmp;
+    });
+  }, [performances, searchQuery, sortKey, sortDesc]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const paginatedRows = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return filteredAndSorted.slice(start, start + pageSize);
+  }, [filteredAndSorted, safePage]);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDesc((d) => !d);
+    } else {
+      setSortKey(key);
+      setSortDesc(true);
+    }
+    setPage(1);
+  };
+
+  // Export CSV (avec BOM UTF-8 pour Excel)
+  const handleExportCsv = () => {
+    const headers = [
+      'Résidence',
+      'Adresse',
+      'Période',
+      'Séjours',
+      'Encaissé (FCFA)',
+      'Prévisionnel (FCFA)',
+      'Reste à encaisser (FCFA)',
+      "Taux d'encaissement (%)",
     ];
 
-    report.residences.forEach((res) => {
-      res.bookings.forEach((b) => {
-        rows.push(
-          [
-            `"${res.residenceName.replace(/"/g, '""')}"`,
-            `"${new Date(b.createdAt).toLocaleString('fr-FR')}"`,
-            `"${b.clientName.replace(/"/g, '""')}"`,
-            `"${new Date(b.checkIn).toLocaleDateString('fr-FR')}"`,
-            `"${new Date(b.checkOut).toLocaleDateString('fr-FR')}"`,
-            `"${b.status}"`,
-            b.paidAmount,
-            b.totalAmount,
-            b.remainingAmount,
-          ].join(';'),
-        );
-      });
-    });
+    const rows = filteredAndSorted.map((item) => [
+      escapeCsvCell(item.name),
+      escapeCsvCell(item.address),
+      escapeCsvCell(periodLabel),
+      escapeCsvCell(item.bookingsCount),
+      escapeCsvCell(Math.round(item.collectedAmount)),
+      escapeCsvCell(Math.round(item.expectedAmount)),
+      escapeCsvCell(Math.round(item.outstandingAmount)),
+      escapeCsvCell(item.collectionRate),
+    ]);
 
-    const csvContent = '\uFEFF' + rows.join('\n');
+    const csvContent =
+      '\uFEFF' +
+      [headers.map(escapeCsvCell).join(';'), ...rows.map((r) => r.join(';'))].join(
+        '\r\n',
+      );
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    const scopeLabel =
-      selectedResidenceId === 'ALL' ? 'toutes-residences' : `residence-${selectedResidenceId}`;
+    const safePeriod = periodLabel.toLowerCase().replace(/[^a-z0-9]+/gi, '-');
     link.href = url;
-    link.setAttribute('download', `rapport-financier-${scopeLabel}.csv`);
+    link.setAttribute('download', `rapport-financier-${safePeriod}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
-  // Export PDF via fenêtre d'impression dédiée (Enregistrer en PDF)
-  const handleDownloadDetailedPdf = () => {
-    if (!report) return;
-
-    const printWindow = window.open('', '_blank', 'width=960,height=720');
-    if (!printWindow) {
-      alert('Veuillez autoriser les fenêtres pop-up pour générer le PDF.');
-      return;
-    }
-
-    const periodText =
-      startDate || endDate
-        ? `Période : ${startDate ? new Date(startDate).toLocaleDateString('fr-FR') : 'Début'} au ${
-            endDate ? new Date(endDate).toLocaleDateString('fr-FR') : 'Aujourd’hui'
-          }`
-        : 'Période : Toutes les dates';
-
-    const scopeText =
-      selectedResidenceId === 'ALL'
-        ? 'Périmètre : Toutes les résidences'
-        : `Périmètre : ${
-            report.residences[0]?.residenceName || 'Résidence sélectionnée'
-          }`;
-
-    const residencesHtml = report.residences
-      .map((res) => {
-        const rowsHtml =
-          res.bookings.length === 0
-            ? `<tr><td colspan="7" class="empty">Aucune réservation enregistrée sur cette période.</td></tr>`
-            : res.bookings
-                .map(
-                  (b) => `
-                  <tr>
-                    <td>${escapeHtml(new Date(b.createdAt).toLocaleDateString('fr-FR'))}</td>
-                    <td><strong>${escapeHtml(b.clientName)}</strong></td>
-                    <td>${escapeHtml(
-                      `${new Date(b.checkIn).toLocaleDateString('fr-FR')} → ${new Date(
-                        b.checkOut,
-                      ).toLocaleDateString('fr-FR')}`,
-                    )}</td>
-                    <td><span class="badge">${escapeHtml(b.status)}</span></td>
-                    <td class="num green">${Number(b.paidAmount).toLocaleString('fr-FR')} FCFA</td>
-                    <td class="num amber">${Number(b.remainingAmount).toLocaleString('fr-FR')} FCFA</td>
-                    <td class="num bold">${Number(b.totalAmount).toLocaleString('fr-FR')} FCFA</td>
-                  </tr>`,
-                )
-                .join('');
-
-        return `
-          <div class="res-block">
-            <div class="res-header">
-              <div>
-                <h3>${escapeHtml(res.residenceName)}</h3>
-                <p>${res.bookingsCount} réservation(s) (${res.activeBookingsCount} active(s), ${res.cancelledBookingsCount} annulée(s))</p>
-              </div>
-              <div class="res-kpis">
-                <span class="green">Actuel : ${res.actualRevenue.toLocaleString('fr-FR')} FCFA</span>
-                <span class="blue">Prévisionnel : ${res.projectedRevenue.toLocaleString('fr-FR')} FCFA</span>
-                <span class="amber">Reste dû : ${res.remainingBalance.toLocaleString('fr-FR')} FCFA</span>
-              </div>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Date réservation</th>
-                  <th>Client</th>
-                  <th>Séjour</th>
-                  <th>Statut</th>
-                  <th class="num">Acompte / Payé</th>
-                  <th class="num">Reste à payer</th>
-                  <th class="num">Total</th>
-                </tr>
-              </thead>
-              <tbody>${rowsHtml}</tbody>
-            </table>
-          </div>`;
-      })
-      .join('');
-
-    const html = `<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8" />
-  <title>Rapport Financier Détaillé — ResidenceMS</title>
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      font-family: Arial, Helvetica, sans-serif;
-      color: #111827;
-      margin: 24px;
-      font-size: 12px;
-    }
-    h1 { font-size: 20px; margin: 0 0 4px 0; font-weight: 800; }
-    .meta { color: #374151; font-size: 11px; margin-bottom: 16px; }
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-    .card {
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      padding: 10px;
-      background: #f9fafb;
-    }
-    .card-label { font-size: 10px; text-transform: uppercase; font-weight: 700; color: #4b5563; }
-    .card-val { font-size: 14px; font-weight: 800; margin-top: 4px; }
-    .green { color: #166534; }
-    .blue { color: #1e40af; }
-    .amber { color: #92400e; }
-    .bold { font-weight: 700; }
-    .res-block { border: 1px solid #d1d5db; border-radius: 6px; margin-bottom: 16px; overflow: hidden; page-break-inside: avoid; }
-    .res-header {
-      background: #f3f4f6;
-      padding: 10px 12px;
-      border-bottom: 1px solid #d1d5db;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-    }
-    .res-header h3 { margin: 0; font-size: 14px; font-weight: 800; }
-    .res-header p { margin: 2px 0 0 0; font-size: 11px; color: #4b5563; }
-    .res-kpis { display: flex; gap: 12px; font-size: 11px; font-weight: 700; flex-wrap: wrap; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid #e5e7eb; padding: 7px 8px; text-align: left; font-size: 11px; }
-    th { background: #fafafa; font-weight: 800; text-transform: uppercase; font-size: 10px; }
-    .num { text-align: right; }
-    .badge { background: #e5e7eb; padding: 2px 6px; border-radius: 999px; font-size: 10px; font-weight: 700; }
-    .empty { text-align: center; color: #4b5563; padding: 12px; }
-    @media print {
-      body { margin: 10px; }
-    }
-  </style>
-</head>
-<body>
-  <h1>Rapport Financier Détaillé — ResidenceMS</h1>
-  <div class="meta">
-    ${escapeHtml(periodText)} • ${escapeHtml(scopeText)} • Généré le ${escapeHtml(
-      new Date().toLocaleString('fr-FR'),
-    )}
-  </div>
-
-  <div class="summary-grid">
-    <div class="card">
-      <div class="card-label">Montant Actuel (Encaissé)</div>
-      <div class="card-val green">${report.totals.actualRevenue.toLocaleString('fr-FR')} FCFA</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Montant Prévisionnel (Actif)</div>
-      <div class="card-val blue">${report.totals.projectedRevenue.toLocaleString('fr-FR')} FCFA</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Reste à Payer (Actif)</div>
-      <div class="card-val amber">${report.totals.remainingBalance.toLocaleString('fr-FR')} FCFA</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Nombre de Réservations</div>
-      <div class="card-val">${report.totals.bookingsCount}</div>
-    </div>
-  </div>
-
-  ${residencesHtml}
-
-  <script>
-    window.onload = function () {
-      window.print();
-    };
-  </script>
-</body>
-</html>`;
-
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
+  // Export PDF via impression propre dédiée
+  const handleExportPdf = () => {
+    window.print();
   };
 
-  if (isLoading || !user) {
+  if (authLoading || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-gray-900 font-bold">Chargement...</div>
+        <span className="text-sm font-bold text-gray-800">
+          Chargement de la session...
+        </span>
+      </div>
+    );
+  }
+
+  if (!canAccessFinances) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
+        <div className="max-w-md w-full bg-white border border-gray-300 rounded-xl p-6 text-center space-y-3">
+          <h1 className="text-lg font-black text-gray-900">Accès restreint</h1>
+          <p className="text-sm text-gray-700">
+            Vous n&apos;avez pas la permission d&apos;accéder au rapport financier.
+          </p>
+          <Link
+            href="/dashboard"
+            className="inline-block px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700"
+          >
+            Retour au tableau de bord
+          </Link>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6 max-w-7xl mx-auto space-y-6">
-      {/* En-tête */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-300 pb-4">
-        <div>
-          <Link href="/dashboard" className="text-sm text-blue-700 hover:underline font-bold">
-            ← Retour au Tableau de bord
-          </Link>
-          <h1 className="text-2xl font-black text-gray-900 mt-1">
-            Rapport Financier &amp; Performances des Résidences
-          </h1>
-          <p className="text-sm text-gray-700 font-semibold">
-            Montant réel encaissé (acomptes reçus, hors annulations) vs montant prévisionnel.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={handleDownloadDetailedPdf}
-            disabled={!report}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-bold rounded-md shadow transition"
-          >
-            📄 Exporter en PDF
-          </button>
-          <button
-            type="button"
-            onClick={handleDownloadDetailedCsv}
-            disabled={!report}
-            className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-bold rounded-md shadow transition"
-          >
-            ⬇ Exporter en CSV
-          </button>
-        </div>
-      </div>
-
-      {/* Filtres dynamiques (Période, Résidence, Critère d'affichage) */}
-      <div className="bg-white p-4 rounded-xl shadow border border-gray-300 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
-        <div>
-          <label className="block text-xs font-bold text-gray-900 uppercase mb-1">
-            Date début
-          </label>
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className={inputStyle}
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-bold text-gray-900 uppercase mb-1">
-            Date fin
-          </label>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className={inputStyle}
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-bold text-gray-900 uppercase mb-1">
-            Résidence
-          </label>
-          <select
-            value={selectedResidenceId}
-            onChange={(e) => setSelectedResidenceId(e.target.value)}
-            className={selectStyle}
-          >
-            <option value="ALL" className="text-gray-900 font-bold bg-white">
-              Toutes les résidences
-            </option>
-            {allResidencesOptions.map((r) => (
-              <option key={r.id} value={r.id} className="text-gray-900 font-bold bg-white">
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-xs font-bold text-gray-900 uppercase mb-1">
-            Axe du graphique
-          </label>
-          <select
-            value={groupBy}
-            onChange={(e) => setGroupBy(e.target.value as 'residence' | 'day')}
-            className={selectStyle}
-          >
-            <option value="residence" className="text-gray-900 font-bold bg-white">
-              Par résidence
-            </option>
-            <option value="day" className="text-gray-900 font-bold bg-white">
-              Par jour (arrivée)
-            </option>
-          </select>
-        </div>
-
-        <div>
-          <button
-            type="button"
-            onClick={() => {
-              setStartDate('');
-              setEndDate('');
-              setSelectedResidenceId('ALL');
-              setGroupBy('residence');
-            }}
-            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-900 text-xs font-bold rounded-lg border border-gray-300 transition"
-          >
-            Réinitialiser
-          </button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="p-4 bg-red-100 border border-red-300 text-red-900 font-bold rounded-lg">
-          {error}
-        </div>
-      )}
-
-      {/* Cartes de synthèse globale */}
-      {report && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-4 rounded-xl shadow border border-gray-300">
-            <div className="text-xs font-bold text-gray-700 uppercase">
-              Montant Actuel (Encaissé)
-            </div>
-            <div className="text-xl font-black text-green-800 mt-1">
-              {report.totals.actualRevenue.toLocaleString('fr-FR')} FCFA
-            </div>
-          </div>
-
-          <div className="bg-white p-4 rounded-xl shadow border border-gray-300">
-            <div className="text-xs font-bold text-gray-700 uppercase">
-              Montant Prévisionnel (Actif)
-            </div>
-            <div className="text-xl font-black text-blue-800 mt-1">
-              {report.totals.projectedRevenue.toLocaleString('fr-FR')} FCFA
-            </div>
-          </div>
-
-          <div className="bg-white p-4 rounded-xl shadow border border-gray-300">
-            <div className="text-xs font-bold text-gray-700 uppercase">
-              Reste à Payer (Actif)
-            </div>
-            <div className="text-xl font-black text-amber-800 mt-1">
-              {report.totals.remainingBalance.toLocaleString('fr-FR')} FCFA
-            </div>
-          </div>
-
-          <div className="bg-white p-4 rounded-xl shadow border border-gray-300">
-            <div className="text-xs font-bold text-gray-700 uppercase">
-              Nombre de Réservations
-            </div>
-            <div className="text-xl font-black text-gray-900 mt-1">
-              {report.totals.bookingsCount}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* GRAPHIQUE COMBINÉ (Barres Montants + Points Nombre de Réservations + Légende) */}
-      <div className="bg-white p-6 rounded-xl shadow border border-gray-300 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-gray-200 pb-3">
+    <div className="min-h-screen bg-gray-50 p-6 print:bg-white print:p-2">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* En-tête & Actions d'export */}
+        <header className="bg-white rounded-xl border border-gray-300 shadow-sm p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 print:shadow-none print:border-gray-200">
           <div>
-            <h2 className="text-lg font-black text-gray-900">
-              Graphique de Performance (Montants &amp; Nombre de Réservations)
-            </h2>
-            <p className="text-xs text-gray-700 font-semibold">
-              Les réservations annulées sont exclues des montants encaissés et prévisionnels.
+            <div className="text-xs font-black uppercase tracking-wider text-green-800 bg-green-50 border border-green-200 inline-block px-3 py-1 rounded-full">
+              Pilotage Financier • {periodLabel} • {performances.length} résidences
+            </div>
+            <h1 className="text-2xl font-black text-gray-900 mt-2">
+              Rapport Financier &amp; Performances des Résidences
+            </h1>
+            <p className="text-sm font-semibold text-gray-700 mt-1">
+              Filtrez par période, comparez vos résidences clés et exportez le rapport en CSV ou PDF.
             </p>
           </div>
 
-          {/* Légende explicite */}
-          <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-gray-900 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm bg-green-600 inline-block" />
-              Montant actuel (encaissé)
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm bg-blue-300 border border-blue-700 inline-block" />
-              Montant prévisionnel
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-purple-700 inline-block" />
-              Nombre de réservations (pointillé/repère)
-            </span>
+          <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-auto print:hidden">
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="px-3.5 py-2.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow transition cursor-pointer"
+            >
+              Exporter CSV
+            </button>
+            <button
+              type="button"
+              onClick={handleExportPdf}
+              className="px-3.5 py-2.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white shadow transition cursor-pointer"
+            >
+              Exporter PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleManualRefresh()}
+              className="px-3.5 py-2.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-900 border border-slate-300 transition cursor-pointer"
+            >
+              Actualiser
+            </button>
+            <Link
+              href="/dashboard"
+              className="px-3.5 py-2.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow transition"
+            >
+              ← Tableau de bord
+            </Link>
           </div>
-        </div>
+        </header>
 
-        {loading ? (
-          <div className="p-8 text-center text-gray-800 font-bold">
-            Calcul des performances en cours...
+        {/* Barre de sélection de période */}
+        <section
+          aria-label="Sélection de la période"
+          className="bg-white rounded-xl border border-gray-300 shadow-sm p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 print:hidden"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-black uppercase text-gray-700 mr-1">
+              Période :
+            </span>
+            {(
+              [
+                { id: 'all', label: 'Tout' },
+                { id: '7d', label: '7 derniers jours' },
+                { id: '30d', label: '30 derniers jours' },
+                { id: 'month', label: 'Ce mois' },
+                { id: 'custom', label: 'Personnalisée' },
+              ] as const
+            ).map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => {
+                  setPeriodPreset(preset.id);
+                  setPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                  periodPreset === preset.id
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                    : 'bg-gray-50 text-gray-800 border-gray-300 hover:bg-gray-100'
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
           </div>
-        ) : chartSeries.length === 0 ? (
-          <div className="p-8 text-center text-gray-800 font-bold">
-            Aucune donnée sur la période sélectionnée.
-          </div>
-        ) : (
-          <div className="space-y-4 pt-2">
-            {chartSeries.map((item) => {
-              const actualPct = Math.round((item.actualRevenue / maxAmount) * 100);
-              const projectedPct = Math.round((item.projectedRevenue / maxAmount) * 100);
-              const bookingsPct = Math.round((item.bookingsCount / maxBookings) * 100);
 
-              return (
-                <div
-                  key={item.key}
-                  className="p-3 rounded-lg border border-gray-200 bg-gray-50 space-y-2"
+          {periodPreset === 'custom' && (
+            <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-gray-800">
+              <label className="flex items-center gap-1.5">
+                <span>Du</span>
+                <input
+                  type="date"
+                  value={startDateInput}
+                  onChange={(e) => {
+                    setStartDateInput(e.target.value);
+                    setPage(1);
+                  }}
+                  className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-gray-900 bg-white"
+                />
+              </label>
+              <label className="flex items-center gap-1.5">
+                <span>au</span>
+                <input
+                  type="date"
+                  value={endDateInput}
+                  onChange={(e) => {
+                    setEndDateInput(e.target.value);
+                    setPage(1);
+                  }}
+                  className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-gray-900 bg-white"
+                />
+              </label>
+            </div>
+          )}
+        </section>
+
+        {errorMsg && (
+          <div className="bg-red-50 border border-red-300 text-red-800 rounded-xl p-4 text-sm font-semibold">
+            {errorMsg}
+          </div>
+        )}
+
+        {/* 1. KPI globaux */}
+        <section
+          aria-label="Indicateurs financiers globaux"
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        >
+          <div className="bg-white rounded-xl border border-gray-300 p-5 shadow-sm">
+            <p className="text-xs font-black uppercase text-gray-600">
+              Total Encaissé
+            </p>
+            <p className="text-xl font-black text-emerald-700 mt-1">
+              {formatFcfa(kpis.totalCollected)}
+            </p>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-300 p-5 shadow-sm">
+            <p className="text-xs font-black uppercase text-gray-600">
+              CA Prévisionnel
+            </p>
+            <p className="text-xl font-black text-gray-900 mt-1">
+              {formatFcfa(kpis.totalExpected)}
+            </p>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-300 p-5 shadow-sm">
+            <p className="text-xs font-black uppercase text-gray-600">
+              Reste à Encaisser
+            </p>
+            <p className="text-xl font-black text-amber-700 mt-1">
+              {formatFcfa(kpis.totalOutstanding)}
+            </p>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-300 p-5 shadow-sm">
+            <p className="text-xs font-black uppercase text-gray-600">
+              Taux d&apos;Encaissement
+            </p>
+            <p className="text-xl font-black text-blue-700 mt-1">
+              {kpis.globalRate} %
+            </p>
+          </div>
+        </section>
+
+        {/* 2. Comparateur ciblé (max 4 résidences) */}
+        <section className="bg-white rounded-xl border border-gray-300 shadow-sm p-6 space-y-5 print:hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-200 pb-4">
+            <div>
+              <h2 className="text-base font-black text-gray-900">
+                Comparateur Ciblé ({comparedItems.length}/4 sélectionnées)
+              </h2>
+              <p className="text-xs font-semibold text-gray-600">
+                Choisissez jusqu&apos;à 4 résidences pour comparer encaissements, prévisionnel et taux sur la période ({periodLabel}).
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={selectTop3}
+                className="px-3 py-2 rounded-lg text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition cursor-pointer"
+              >
+                Top 3 Encaissements
+              </button>
+              {selectedCompareIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setCustomCompareIds([])}
+                  className="px-3 py-2 rounded-lg text-xs font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition cursor-pointer"
                 >
-                  <div className="flex flex-wrap justify-between items-center gap-2 text-xs font-bold text-gray-900">
-                    <span className="text-sm font-black">{item.label}</span>
-                    <div className="flex flex-wrap gap-3">
-                      <span className="text-green-800">
-                        Actuel : {item.actualRevenue.toLocaleString('fr-FR')} FCFA
-                      </span>
-                      <span className="text-blue-800">
-                        Prévisionnel : {item.projectedRevenue.toLocaleString('fr-FR')} FCFA
-                      </span>
-                      <span className="text-purple-800">
-                        Réservations : {item.bookingsCount}
-                      </span>
-                    </div>
-                  </div>
+                  Effacer
+                </button>
+              )}
+            </div>
+          </div>
 
-                  {/* Barre Montant Prévisionnel */}
-                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                    <div
-                      className="bg-blue-400 h-3 rounded-full transition-all"
-                      style={{ width: `${projectedPct}%` }}
-                    />
-                  </div>
-
-                  {/* Barre Montant Actuel (Encaissé) */}
-                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                    <div
-                      className="bg-green-600 h-3 rounded-full transition-all"
-                      style={{ width: `${actualPct}%` }}
-                    />
-                  </div>
-
-                  {/* Piste en pointillés avec point représentant le nombre de réservations */}
-                  <div className="relative w-full border-b-2 border-dotted border-purple-400 h-4 flex items-center">
-                    <span
-                      title={`${item.bookingsCount} réservation(s)`}
-                      className="w-3.5 h-3.5 rounded-full bg-purple-700 border-2 border-white shadow inline-block transition-all"
-                      style={{
-                        marginLeft: `calc(${Math.min(96, Math.max(2, bookingsPct))}% - 7px)`,
-                      }}
-                    />
-                  </div>
-                </div>
+          <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto pr-1">
+            {performances.map((item) => {
+              const active = selectedCompareIds.includes(item.id);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => toggleCompareResidence(item.id)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition cursor-pointer ${
+                    active
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                      : 'bg-gray-50 text-gray-800 border-gray-300 hover:bg-gray-100'
+                  }`}
+                >
+                  {active ? '✓ ' : '+ '}
+                  {item.name}
+                </button>
               );
             })}
           </div>
-        )}
-      </div>
 
-      {/* COMPARATEUR DE 3 RÉSIDENCES MAXIMUM */}
-      <div className="bg-white p-6 rounded-xl shadow border border-gray-300 space-y-4">
-        <div>
-          <h2 className="text-lg font-black text-gray-900">
-            Comparateur de Résidences (3 maximum)
-          </h2>
-          <p className="text-xs text-gray-700 font-semibold">
-            Sélectionnez jusqu&apos;à 3 résidences pour comparer leurs performances côte à côte (
-            {comparedIds.length}/3 sélectionnées).
-          </p>
-        </div>
+          {comparedItems.length === 0 ? (
+            <div className="text-xs font-semibold text-gray-600 bg-gray-50 border border-dashed border-gray-300 rounded-lg p-6 text-center">
+              Sélectionnez une ou plusieurs résidences ci-dessus pour afficher la comparaison côte à côte.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {comparedItems.map((item) => {
+                const collectedPct = Math.round(
+                  (item.collectedAmount / maxComparedValue) * 100,
+                );
+                const expectedPct = Math.round(
+                  (item.expectedAmount / maxComparedValue) * 100,
+                );
 
-        <div className="flex flex-wrap gap-2">
-          {allResidencesOptions.map((res) => {
-            const active = comparedIds.includes(res.id);
-            return (
-              <button
-                key={res.id}
-                type="button"
-                onClick={() => toggleCompareResidence(res.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
-                  active
-                    ? 'bg-purple-700 text-white border-purple-800'
-                    : 'bg-white text-gray-900 border-gray-300 hover:bg-gray-100'
-                }`}
-              >
-                {active ? '✓ ' : '+ '}
-                {res.name}
-              </button>
-            );
-          })}
-        </div>
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-gray-200 bg-gray-50/70 p-4 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-black text-gray-900">
+                          {item.name}
+                        </h3>
+                        <p className="text-[11px] font-semibold text-gray-600">
+                          {item.bookingsCount} séjour(s) • Taux :{' '}
+                          <span className="text-blue-700 font-bold">
+                            {item.collectionRate}%
+                          </span>
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleCompareResidence(item.id)}
+                        className="text-xs font-bold text-gray-500 hover:text-red-600 px-1.5 cursor-pointer"
+                        title="Retirer de la comparaison"
+                      >
+                        ✕
+                      </button>
+                    </div>
 
-        {comparedItems.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-            {comparedItems.map((c) => (
-              <div
-                key={c.residenceId}
-                className="p-4 rounded-xl border-2 border-purple-200 bg-gray-50 space-y-2"
-              >
-                <div className="font-black text-gray-900 text-base border-b border-gray-200 pb-1">
-                  {c.residenceName}
-                </div>
-                <div className="text-xs font-bold text-gray-800 flex justify-between">
-                  <span>Réservations :</span>
-                  <span className="text-gray-900 font-black">{c.bookingsCount}</span>
-                </div>
-                <div className="text-xs font-bold text-gray-800 flex justify-between">
-                  <span>Montant actuel :</span>
-                  <span className="text-green-800 font-black">
-                    {c.actualRevenue.toLocaleString('fr-FR')} FCFA
-                  </span>
-                </div>
-                <div className="text-xs font-bold text-gray-800 flex justify-between">
-                  <span>Montant prévisionnel :</span>
-                  <span className="text-blue-800 font-black">
-                    {c.projectedRevenue.toLocaleString('fr-FR')} FCFA
-                  </span>
-                </div>
-                <div className="text-xs font-bold text-gray-800 flex justify-between">
-                  <span>Reste à payer :</span>
-                  <span className="text-amber-800 font-black">
-                    {c.remainingBalance.toLocaleString('fr-FR')} FCFA
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+                    <div className="space-y-2 text-xs">
+                      <div>
+                        <div className="flex justify-between font-bold text-emerald-800 mb-1">
+                          <span>Encaissé</span>
+                          <span>{formatFcfa(item.collectedAmount)}</span>
+                        </div>
+                        <div className="w-full h-2 bg-emerald-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-600 rounded-full"
+                            style={{ width: `${collectedPct}%` }}
+                          />
+                        </div>
+                      </div>
 
-      {/* RAPPORT DÉTAILLÉ PAR RÉSIDENCE (CHRONOLOGIE DES RÉSERVATIONS) */}
-      {report && (
-        <div className="bg-white p-6 rounded-xl shadow border border-gray-300 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-200 pb-3">
+                      <div>
+                        <div className="flex justify-between font-bold text-slate-800 mb-1">
+                          <span>Prévisionnel</span>
+                          <span>{formatFcfa(item.expectedAmount)}</span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-blue-600 rounded-full"
+                            style={{ width: `${expectedPct}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* 3. Classement complet filtrable & paginé */}
+        <section className="bg-white rounded-xl border border-gray-300 shadow-sm p-6 space-y-4 print:shadow-none print:border-gray-200">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-              <h2 className="text-lg font-black text-gray-900">
-                Rapport Détaillé &amp; Chronologie des Réservations
+              <h2 className="text-base font-black text-gray-900">
+                Classement Détaillé par Résidence ({periodLabel})
               </h2>
-              <p className="text-xs text-gray-700 font-semibold">
-                {selectedResidenceId === 'ALL'
-                  ? 'Affichage groupé par résidence pour la période sélectionnée.'
-                  : 'Affichage détaillé de la résidence sélectionnée pour la période.'}
+              <p className="text-xs font-semibold text-gray-600">
+                Recherchez, triez par colonne et naviguez par page ({filteredAndSorted.length} résultat(s)).
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Rechercher une résidence..."
+              className="w-full sm:w-64 px-3.5 py-2 text-xs font-semibold border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:outline-none print:hidden"
+            />
+          </div>
+
+          {loadingData ? (
+            <div className="py-10 text-center text-xs font-bold text-gray-600">
+              Calcul des performances en cours...
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-gray-200 text-gray-700 font-black uppercase bg-gray-50">
+                    <th className="py-3 px-3 print:hidden">Comparer</th>
+                    <th className="py-3 px-3">
+                      <button
+                        type="button"
+                        onClick={() => handleSort('name')}
+                        className="font-black uppercase hover:text-blue-700 cursor-pointer"
+                      >
+                        Résidence {sortKey === 'name' ? (sortDesc ? '↓' : '↑') : ''}
+                      </button>
+                    </th>
+                    <th className="py-3 px-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleSort('bookingsCount')}
+                        className="font-black uppercase hover:text-blue-700 cursor-pointer"
+                      >
+                        Séjours {sortKey === 'bookingsCount' ? (sortDesc ? '↓' : '↑') : ''}
+                      </button>
+                    </th>
+                    <th className="py-3 px-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleSort('collectedAmount')}
+                        className="font-black uppercase hover:text-blue-700 cursor-pointer"
+                      >
+                        Encaissé {sortKey === 'collectedAmount' ? (sortDesc ? '↓' : '↑') : ''}
+                      </button>
+                    </th>
+                    <th className="py-3 px-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleSort('expectedAmount')}
+                        className="font-black uppercase hover:text-blue-700 cursor-pointer"
+                      >
+                        Prévisionnel {sortKey === 'expectedAmount' ? (sortDesc ? '↓' : '↑') : ''}
+                      </button>
+                    </th>
+                    <th className="py-3 px-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleSort('collectionRate')}
+                        className="font-black uppercase hover:text-blue-700 cursor-pointer"
+                      >
+                        Taux {sortKey === 'collectionRate' ? (sortDesc ? '↓' : '↑') : ''}
+                      </button>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {paginatedRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="py-8 text-center font-semibold text-gray-600"
+                      >
+                        Aucune résidence ne correspond à la période ou à la recherche sélectionnée.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedRows.map((row) => {
+                      const isCompared = selectedCompareIds.includes(row.id);
+                      return (
+                        <tr
+                          key={row.id}
+                          className="hover:bg-blue-50/40 transition"
+                        >
+                          <td className="py-3 px-3 print:hidden">
+                            <input
+                              type="checkbox"
+                              checked={isCompared}
+                              onChange={() => toggleCompareResidence(row.id)}
+                              aria-label={`Comparer ${row.name}`}
+                              className="h-4 w-4 rounded border-gray-300 text-blue-600 cursor-pointer"
+                            />
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className="font-bold text-gray-900">
+                              {row.name}
+                            </div>
+                            <div className="text-[11px] text-gray-500">
+                              {row.address}
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-right font-bold text-gray-800">
+                            {row.bookingsCount}
+                          </td>
+                          <td className="py-3 px-3 text-right font-bold text-emerald-700">
+                            {formatFcfa(row.collectedAmount)}
+                          </td>
+                          <td className="py-3 px-3 text-right font-bold text-gray-900">
+                            {formatFcfa(row.expectedAmount)}
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <span className="inline-block px-2.5 py-0.5 rounded-full font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                              {row.collectionRate}%
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between pt-2 border-t border-gray-200 text-xs font-bold text-gray-700 print:hidden">
+            <span>
+              Page {safePage} sur {totalPages}
+            </span>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleDownloadDetailedPdf}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg shadow transition"
+                disabled={safePage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
-                📄 Télécharger en PDF
+                Précédent
               </button>
               <button
                 type="button"
-                onClick={handleDownloadDetailedCsv}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg shadow transition"
+                disabled={safePage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
-                ⬇ Télécharger en CSV
+                Suivant
               </button>
             </div>
           </div>
-
-          {report.residences.map((res) => (
-            <div
-              key={res.residenceId}
-              className="border border-gray-300 rounded-xl overflow-hidden"
-            >
-              <div className="bg-gray-100 p-4 flex flex-wrap justify-between items-center gap-2 border-b border-gray-300">
-                <div>
-                  <h3 className="font-black text-gray-900 text-base">{res.residenceName}</h3>
-                  <p className="text-xs font-bold text-gray-700">
-                    {res.bookingsCount} réservation(s) ({res.activeBookingsCount} active(s),{' '}
-                    {res.cancelledBookingsCount} annulée(s))
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-4 text-xs font-black">
-                  <span className="text-green-800">
-                    Actuel : {res.actualRevenue.toLocaleString('fr-FR')} FCFA
-                  </span>
-                  <span className="text-blue-800">
-                    Prévisionnel : {res.projectedRevenue.toLocaleString('fr-FR')} FCFA
-                  </span>
-                  <span className="text-amber-800">
-                    Reste dû : {res.remainingBalance.toLocaleString('fr-FR')} FCFA
-                  </span>
-                </div>
-              </div>
-
-              {res.bookings.length === 0 ? (
-                <div className="p-4 text-xs font-bold text-gray-700">
-                  Aucune réservation enregistrée sur cette période.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200 text-gray-900 font-black uppercase">
-                        <th className="p-3">Date réservation</th>
-                        <th className="p-3">Client</th>
-                        <th className="p-3">Séjour</th>
-                        <th className="p-3">Statut</th>
-                        <th className="p-3">Acompte / Payé</th>
-                        <th className="p-3">Reste à payer</th>
-                        <th className="p-3">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 font-semibold text-gray-900">
-                      {res.bookings.map((b) => (
-                        <tr key={b.id} className="hover:bg-gray-50">
-                          <td className="p-3">
-                            {new Date(b.createdAt).toLocaleDateString('fr-FR')}
-                          </td>
-                          <td className="p-3 font-bold">{b.clientName}</td>
-                          <td className="p-3">
-                            {new Date(b.checkIn).toLocaleDateString('fr-FR')} →{' '}
-                            {new Date(b.checkOut).toLocaleDateString('fr-FR')}
-                          </td>
-                          <td className="p-3">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[11px] font-black ${
-                                b.status === 'CANCELLED' || b.status === 'REFUNDED'
-                                  ? 'bg-red-100 text-red-900'
-                                  : b.status === 'CONFIRMED' || b.status === 'COMPLETED'
-                                  ? 'bg-green-100 text-green-900'
-                                  : 'bg-yellow-100 text-yellow-900'
-                              }`}
-                            >
-                              {b.status}
-                            </span>
-                          </td>
-                          <td className="p-3 text-green-800 font-bold">
-                            {Number(b.paidAmount).toLocaleString('fr-FR')} FCFA
-                          </td>
-                          <td className="p-3 text-amber-800 font-bold">
-                            {Number(b.remainingAmount).toLocaleString('fr-FR')} FCFA
-                          </td>
-                          <td className="p-3 font-black">
-                            {Number(b.totalAmount).toLocaleString('fr-FR')} FCFA
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+        </section>
+      </div>
     </div>
   );
 }

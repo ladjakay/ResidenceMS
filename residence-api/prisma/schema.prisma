@@ -19,10 +19,50 @@ model User {
   roleId          String
   role            Role             @relation(fields: [roleId], references: [id])
   userPermissions UserPermission[]
+  refreshTokens   RefreshToken[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @default(now()) @updatedAt // <-- Ajouter @default(now())
 
   bookings        Booking[]
+  auditLogs       AuditLog[]
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actorEmail String?
+  actorRole  String?
+  action     String   // ex: 'BOOKING_CREATED', 'BOOKING_STATUS_CHANGED', 'RESIDENCE_STATUS_UPDATED'
+  entity     String   // ex: 'Booking', 'Residence', 'Tenant', 'User'
+  entityId   String?
+  details    Json?    // données avant/après ou résumé métier
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+}
+
+model RefreshToken {
+  id                String    @id @default(uuid())
+  userId            String
+  tokenHash         String    @unique
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  replacedByTokenId String?
+  ipAddress         String?
+  userAgent         String?
+  lastUsedAt        DateTime?
+  createdAt         DateTime  @default(now())
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Role {

@@ -2,46 +2,54 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { PrismaService } from '../../prisma/prisma.service'; // Ajustez le chemin vers votre PrismaService si nécessaire
+import { PrismaService } from '../../prisma/prisma.service';
+
+interface AccessTokenPayload {
+  sub: string;
+  sid?: string;
+  email: string;
+  role: string;
+  permissions?: string[];
+}
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(private prisma: PrismaService) {
+  constructor(private readonly prisma: PrismaService) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'SUPER_SECRET_KEY_RESIDENCE_2026',
+      secretOrKey:
+        process.env.JWT_ACCESS_SECRET ||
+        process.env.JWT_SECRET ||
+        'SUPER_SECRET_KEY_RESIDENCE_2026',
     });
   }
 
-  async validate(payload: { sub: string; email: string }) {
-    // 1. Récupération dynamique de l'utilisateur et de ses permissions fraîches depuis la BDD
-    const user = await this.prisma.user.findUnique({
-      where: {
-        id: payload.sub,
-        isActive: true, // Rejette immédiatement la requête si l'utilisateur est désactivé
-      },
-      include: {
-        role: {
-          include: {
-            permissions: {
-              include: { permission: true },
-            },
-          },
-        },
-        userPermissions: {
-          include: { permission: true },
-        },
-      },
-    });
-    // 2. Si l'utilisateur n'existe plus ou est inactif
-    if (!user) {
-      throw new UnauthorizedException('Utilisateur inactif ou introuvable.');
+  async validate(payload: AccessTokenPayload) {
+    if (payload.sid) {
+      const session = await this.prisma.refreshToken.findUnique({
+        where: { id: payload.sid },
+        select: { id: true, revokedAt: true, expiresAt: true },
+      });
+
+      if (
+        !session ||
+        session.revokedAt !== null ||
+        session.expiresAt.getTime() <= Date.now()
+      ) {
+        throw new UnauthorizedException(
+          'Session expirée ou terminée depuis un autre appareil.',
+        );
+      }
     }
-    // 3. Injections des données dans req.user avec rétrocompatibilité (id et userId)
+
     return {
-      ...user,
-      userId: user.id, // Garantit la compatibilité avec vos contrôleurs existants
+      id: payload.sub,
+      sub: payload.sub,
+      sid: payload.sid,
+      email: payload.email,
+      role: payload.role,
+      permissions: payload.permissions ?? [],
     };
   }
 }

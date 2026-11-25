@@ -6,7 +6,14 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 
-type IconType = 'booking' | 'residence' | 'client' | 'finance' | 'users' | 'lock';
+type IconType =
+  | 'booking'
+  | 'residence'
+  | 'client'
+  | 'finance'
+  | 'users'
+  | 'audit'
+  | 'lock';
 
 function DashboardIcon({
   type,
@@ -107,6 +114,23 @@ function DashboardIcon({
           <path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
       );
+    case 'audit':
+      return (
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={className}
+          aria-hidden="true"
+        >
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <path d="M9 15l2 2 4-4" />
+        </svg>
+      );
     case 'lock':
       return (
         <svg
@@ -127,7 +151,8 @@ function DashboardIcon({
 }
 
 export default function DashboardPage() {
-  const { user, logout, hasPermission, isLoading } = useAuth();
+  const { user, logout, logoutAllSessions, hasPermission, isLoading } =
+    useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -148,7 +173,6 @@ export default function DashboardPage() {
 
   const isSuperAdmin = user.role === 'SUPER_ADMIN';
 
-  // Permissions par module
   const canAccessBookings =
     isSuperAdmin ||
     hasPermission('booking:read') ||
@@ -164,6 +188,8 @@ export default function DashboardPage() {
   const canAccessFinances = isSuperAdmin || hasPermission('finance:view');
   const canAccessUsers =
     isSuperAdmin || hasPermission('permissions:manage');
+  const canAccessAuditLogs =
+    isSuperAdmin || hasPermission('permissions:manage');
 
   const fullName =
     `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
@@ -174,10 +200,14 @@ export default function DashboardPage() {
         {/* En-tête principal */}
         <header className="bg-white rounded-xl border border-gray-300 shadow-sm p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wider text-blue-800 bg-blue-50 border border-blue-200 px-3 py-1 rounded-full">
+            <div className="inline-flex flex-wrap items-center gap-2 text-xs font-black uppercase tracking-wider text-blue-800 bg-blue-50 border border-blue-200 px-3 py-1 rounded-full">
               <span>ResidenceMS</span>
               <span>•</span>
               <span>{user.role}</span>
+              <span>•</span>
+              <span className="text-emerald-700 font-bold normal-case">
+                Session active ({user.email})
+              </span>
             </div>
             <h1 className="text-2xl font-black text-gray-900 pt-1">
               Bienvenue, {fullName}
@@ -187,30 +217,41 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={logout}
-            className="self-start md:self-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow transition cursor-pointer"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="w-4 h-4 text-white"
-              aria-hidden="true"
+          <div className="flex flex-wrap items-center gap-2.5 self-start md:self-auto">
+            <button
+              type="button"
+              onClick={logoutAllSessions}
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-bold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition cursor-pointer"
+              title="Révoquer toutes les sessions actives de ce compte"
             >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-            <span>Se déconnecter</span>
-          </button>
+              <span>Déconnecter toutes les sessions</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={logout}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow transition cursor-pointer"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-4 h-4 text-white"
+                aria-hidden="true"
+              >
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+              <span>Se déconnecter</span>
+            </button>
+          </div>
         </header>
 
-        {/* Grille des modules d'action */}
+        {/* Grille des modules */}
         <section aria-label="Espaces applicatifs" className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-black text-gray-900">
@@ -228,7 +269,6 @@ export default function DashboardPage() {
                 <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-blue-800 opacity-[0.07]">
                   <DashboardIcon type="booking" className="w-36 h-36" />
                 </div>
-
                 <div className="relative z-10 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wide text-blue-800">
@@ -238,15 +278,11 @@ export default function DashboardPage() {
                       <DashboardIcon type="booking" className="w-4 h-4" />
                     </span>
                   </div>
-
-                  <h3 className="text-lg font-black text-gray-900">
-                    Réservations
-                  </h3>
+                  <h3 className="text-lg font-black text-gray-900">Réservations</h3>
                   <p className="text-xs font-semibold text-gray-700 leading-relaxed">
                     Créez et suivez vos réservations, vérifiez les acomptes perçus, validez les dates de séjour et téléchargez les reçus clients.
                   </p>
                 </div>
-
                 <div className="relative z-10 pt-4">
                   <Link
                     href="/bookings"
@@ -263,7 +299,6 @@ export default function DashboardPage() {
                 <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-gray-400 opacity-[0.05]">
                   <DashboardIcon type="lock" className="w-36 h-36" />
                 </div>
-
                 <div className="relative z-10 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wide text-gray-600">
@@ -273,15 +308,11 @@ export default function DashboardPage() {
                       <DashboardIcon type="lock" className="w-4 h-4" />
                     </span>
                   </div>
-
-                  <h3 className="text-lg font-black text-gray-800">
-                    Réservations
-                  </h3>
+                  <h3 className="text-lg font-black text-gray-800">Réservations</h3>
                   <p className="text-xs font-semibold text-gray-600 leading-relaxed">
                     Vous ne disposez pas des autorisations nécessaires pour consulter ou enregistrer des réservations.
                   </p>
                 </div>
-
                 <div className="relative z-10 pt-4">
                   <button
                     disabled
@@ -300,7 +331,6 @@ export default function DashboardPage() {
                 <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-amber-800 opacity-[0.07]">
                   <DashboardIcon type="residence" className="w-36 h-36" />
                 </div>
-
                 <div className="relative z-10 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wide text-amber-900">
@@ -310,15 +340,11 @@ export default function DashboardPage() {
                       <DashboardIcon type="residence" className="w-4 h-4" />
                     </span>
                   </div>
-
-                  <h3 className="text-lg font-black text-gray-900">
-                    Résidences
-                  </h3>
+                  <h3 className="text-lg font-black text-gray-900">Résidences</h3>
                   <p className="text-xs font-semibold text-gray-700 leading-relaxed">
                     Ajoutez vos hébergements, ajustez les prix par nuitée, et désactivez vos logements en toute sécurité sans perdre l’historique.
                   </p>
                 </div>
-
                 <div className="relative z-10 pt-4">
                   <Link
                     href="/residences"
@@ -335,7 +361,6 @@ export default function DashboardPage() {
                 <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-gray-400 opacity-[0.05]">
                   <DashboardIcon type="lock" className="w-36 h-36" />
                 </div>
-
                 <div className="relative z-10 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wide text-gray-600">
@@ -345,15 +370,11 @@ export default function DashboardPage() {
                       <DashboardIcon type="lock" className="w-4 h-4" />
                     </span>
                   </div>
-
-                  <h3 className="text-lg font-black text-gray-800">
-                    Résidences
-                  </h3>
+                  <h3 className="text-lg font-black text-gray-800">Résidences</h3>
                   <p className="text-xs font-semibold text-gray-600 leading-relaxed">
                     La gestion et la consultation du catalogue de résidences requièrent la permission <code className="font-bold">residence:read</code>.
                   </p>
                 </div>
-
                 <div className="relative z-10 pt-4">
                   <button
                     disabled
@@ -372,7 +393,6 @@ export default function DashboardPage() {
                 <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-indigo-800 opacity-[0.07]">
                   <DashboardIcon type="client" className="w-36 h-36" />
                 </div>
-
                 <div className="relative z-10 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wide text-indigo-800">
@@ -382,15 +402,11 @@ export default function DashboardPage() {
                       <DashboardIcon type="client" className="w-4 h-4" />
                     </span>
                   </div>
-
-                  <h3 className="text-lg font-black text-gray-900">
-                    Clients
-                  </h3>
+                  <h3 className="text-lg font-black text-gray-900">Clients</h3>
                   <p className="text-xs font-semibold text-gray-700 leading-relaxed">
                     Consultez l’annuaire des locataires, créez de nouvelles fiches clients et mettez à jour leurs coordonnées de contact.
                   </p>
                 </div>
-
                 <div className="relative z-10 pt-4">
                   <Link
                     href="/clients"
@@ -407,7 +423,6 @@ export default function DashboardPage() {
                 <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-gray-400 opacity-[0.05]">
                   <DashboardIcon type="lock" className="w-36 h-36" />
                 </div>
-
                 <div className="relative z-10 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wide text-gray-600">
@@ -417,15 +432,11 @@ export default function DashboardPage() {
                       <DashboardIcon type="lock" className="w-4 h-4" />
                     </span>
                   </div>
-
-                  <h3 className="text-lg font-black text-gray-800">
-                    Clients
-                  </h3>
+                  <h3 className="text-lg font-black text-gray-800">Clients</h3>
                   <p className="text-xs font-semibold text-gray-600 leading-relaxed">
                     L’accès au répertorire des fiches clients nécessite la permission <code className="font-bold">client:read</code>.
                   </p>
                 </div>
-
                 <div className="relative z-10 pt-4">
                   <button
                     disabled
@@ -444,7 +455,6 @@ export default function DashboardPage() {
                 <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-green-800 opacity-[0.07]">
                   <DashboardIcon type="finance" className="w-36 h-36" />
                 </div>
-
                 <div className="relative z-10 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wide text-green-800">
@@ -454,7 +464,6 @@ export default function DashboardPage() {
                       <DashboardIcon type="finance" className="w-4 h-4" />
                     </span>
                   </div>
-
                   <h3 className="text-lg font-black text-gray-900">
                     Finances &amp; Rapport
                   </h3>
@@ -462,7 +471,6 @@ export default function DashboardPage() {
                     Comparez l’argent réellement encaissé face au chiffre d’affaires prévisionnel, analysez le graphique de performance et téléchargez vos rapports en CSV ou PDF.
                   </p>
                 </div>
-
                 <div className="relative z-10 pt-4">
                   <Link
                     href="/finances"
@@ -479,7 +487,6 @@ export default function DashboardPage() {
                 <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-gray-400 opacity-[0.05]">
                   <DashboardIcon type="lock" className="w-36 h-36" />
                 </div>
-
                 <div className="relative z-10 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wide text-gray-600">
@@ -489,15 +496,11 @@ export default function DashboardPage() {
                       <DashboardIcon type="lock" className="w-4 h-4" />
                     </span>
                   </div>
-
-                  <h3 className="text-lg font-black text-gray-800">
-                    Finances
-                  </h3>
+                  <h3 className="text-lg font-black text-gray-800">Finances</h3>
                   <p className="text-xs font-semibold text-gray-600 leading-relaxed">
                     L’accès aux données financières de l’entreprise est réservé aux rôles et utilisateurs autorisés.
                   </p>
                 </div>
-
                 <div className="relative z-10 pt-4">
                   <button
                     disabled
@@ -516,7 +519,6 @@ export default function DashboardPage() {
                 <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-purple-800 opacity-[0.07]">
                   <DashboardIcon type="users" className="w-36 h-36" />
                 </div>
-
                 <div className="relative z-10 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wide text-purple-800">
@@ -526,7 +528,6 @@ export default function DashboardPage() {
                       <DashboardIcon type="users" className="w-4 h-4" />
                     </span>
                   </div>
-
                   <h3 className="text-lg font-black text-gray-900">
                     Gestion Utilisateurs
                   </h3>
@@ -534,7 +535,6 @@ export default function DashboardPage() {
                     Administrez les comptes de votre équipe, choisissez leurs rôles et attribuez des permissions spécifiques de manière sécurisée.
                   </p>
                 </div>
-
                 <div className="relative z-10 pt-4">
                   <Link
                     href="/users"
@@ -551,7 +551,6 @@ export default function DashboardPage() {
                 <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-gray-400 opacity-[0.05]">
                   <DashboardIcon type="lock" className="w-36 h-36" />
                 </div>
-
                 <div className="relative z-10 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wide text-gray-600">
@@ -561,7 +560,6 @@ export default function DashboardPage() {
                       <DashboardIcon type="lock" className="w-4 h-4" />
                     </span>
                   </div>
-
                   <h3 className="text-lg font-black text-gray-800">
                     Gestion Utilisateurs
                   </h3>
@@ -569,7 +567,72 @@ export default function DashboardPage() {
                     Seuls les administrateurs disposant de la permission d’administration peuvent attribuer ou révoquer des accès.
                   </p>
                 </div>
+                <div className="relative z-10 pt-4">
+                  <button
+                    disabled
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold bg-gray-200 text-gray-700 cursor-not-allowed"
+                  >
+                    <DashboardIcon type="lock" className="w-4 h-4" />
+                    <span>Accès non autorisé</span>
+                  </button>
+                </div>
+              </article>
+            )}
 
+            {/* 6. Journal d'audit */}
+            {canAccessAuditLogs ? (
+              <article className="relative overflow-hidden bg-white rounded-xl border border-slate-300 border-l-4 border-l-slate-800 shadow-sm hover:shadow-md transition p-6 flex flex-col justify-between min-h-[220px]">
+                <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-slate-800 opacity-[0.07]">
+                  <DashboardIcon type="audit" className="w-36 h-36" />
+                </div>
+                <div className="relative z-10 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-black uppercase tracking-wide text-slate-800">
+                      Traçabilité &amp; Sécurité
+                    </span>
+                    <span className="p-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-800">
+                      <DashboardIcon type="audit" className="w-4 h-4" />
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-black text-gray-900">
+                    Journal d&apos;audit
+                  </h3>
+                  <p className="text-xs font-semibold text-gray-700 leading-relaxed">
+                    Consultez l’historique des créations, modifications et changements de statut, filtrez par entité et inspectez les détails JSON et adresses IP.
+                  </p>
+                </div>
+                <div className="relative z-10 pt-4">
+                  <Link
+                    href="/audit-logs"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold shadow transition bg-slate-800 hover:bg-slate-900 text-white"
+                  >
+                    <DashboardIcon type="audit" className="w-4 h-4" />
+                    <span>Consulter les logs</span>
+                    <span aria-hidden="true">→</span>
+                  </Link>
+                </div>
+              </article>
+            ) : (
+              <article className="relative overflow-hidden bg-white rounded-xl border border-gray-200 shadow-sm p-6 flex flex-col justify-between min-h-[220px]">
+                <div className="pointer-events-none select-none absolute -right-3 -bottom-3 text-gray-400 opacity-[0.05]">
+                  <DashboardIcon type="lock" className="w-36 h-36" />
+                </div>
+                <div className="relative z-10 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-black uppercase tracking-wide text-gray-600">
+                      Accès Restreint
+                    </span>
+                    <span className="p-2 rounded-lg bg-gray-100 border border-gray-200 text-gray-600">
+                      <DashboardIcon type="lock" className="w-4 h-4" />
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-black text-gray-800">
+                    Journal d&apos;audit
+                  </h3>
+                  <p className="text-xs font-semibold text-gray-600 leading-relaxed">
+                    La consultation des journaux d’audit est réservée aux administrateurs disposant de la permission <code className="font-bold">permissions:manage</code>.
+                  </p>
+                </div>
                 <div className="relative z-10 pt-4">
                   <button
                     disabled

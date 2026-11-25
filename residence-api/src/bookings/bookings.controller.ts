@@ -13,8 +13,8 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { Response } from 'express';
-import { BookingsService } from './bookings.service';
+import type { Request, Response } from 'express';
+import { BookingsService, AuditActorContext } from './bookings.service';
 import { PdfService } from './pdf.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
@@ -23,6 +23,41 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { BookingStatus } from '@prisma/client';
+
+interface AuthenticatedRequest extends Request {
+  user?: {
+    id?: string;
+    userId?: string;
+    sub?: string;
+    email?: string;
+    role?: string | { name?: string };
+  };
+}
+
+function extractAuditContext(req: AuthenticatedRequest): AuditActorContext {
+  const userId = req.user?.id || req.user?.userId || req.user?.sub || null;
+  const rawRole = req.user?.role;
+  const role =
+    typeof rawRole === 'string' ? rawRole : rawRole?.name || null;
+
+  const forwardedFor = req.headers['x-forwarded-for'];
+  const ipFromHeader = Array.isArray(forwardedFor)
+    ? forwardedFor[0]
+    : forwardedFor?.split(',')[0]?.trim();
+
+  const userAgentHeader = req.headers['user-agent'];
+  const userAgent = Array.isArray(userAgentHeader)
+    ? userAgentHeader[0]
+    : userAgentHeader || null;
+
+  return {
+    userId,
+    email: req.user?.email || null,
+    role,
+    ipAddress: ipFromHeader || req.ip || null,
+    userAgent,
+  };
+}
 
 @Controller('bookings')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -38,16 +73,23 @@ export class BookingsController {
    */
   @Post()
   @RequirePermissions('booking:create')
-  async create(@Body() createBookingDto: CreateBookingDto, @Req() req: any) {
-    const userId = req.user?.id || req.user?.userId || req.user?.sub;
+  async create(
+    @Body() createBookingDto: CreateBookingDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const auditCtx = extractAuditContext(req);
 
-    if (!userId) {
+    if (!auditCtx.userId) {
       throw new UnauthorizedException(
-        'Impossible d\'identifier l\'utilisateur connecté depuis le token JWT.',
+        "Impossible d'identifier l'utilisateur connecté depuis le token JWT.",
       );
     }
 
-    return this.bookingsService.create(createBookingDto, userId);
+    return this.bookingsService.create(
+      createBookingDto,
+      auditCtx.userId,
+      auditCtx,
+    );
   }
 
   /**
@@ -79,8 +121,10 @@ export class BookingsController {
   async updateStatus(
     @Param('id') id: string,
     @Body() updateBookingStatusDto: UpdateBookingStatusDto,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.bookingsService.updateStatus(id, updateBookingStatusDto);
+    const auditCtx = extractAuditContext(req);
+    return this.bookingsService.updateStatus(id, updateBookingStatusDto, auditCtx);
   }
 
   /**
@@ -92,8 +136,10 @@ export class BookingsController {
   async update(
     @Param('id') id: string,
     @Body() updateBookingDto: UpdateBookingDto,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.bookingsService.update(id, updateBookingDto);
+    const auditCtx = extractAuditContext(req);
+    return this.bookingsService.update(id, updateBookingDto, auditCtx);
   }
 
   /**

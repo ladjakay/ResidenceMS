@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface Residence {
@@ -15,6 +15,7 @@ interface Tenant {
   firstName: string;
   lastName: string;
   phone: string;
+  isActive?: boolean;
 }
 
 export default function CreateBookingForm() {
@@ -23,10 +24,18 @@ export default function CreateBookingForm() {
   // Données dynamiques depuis l'API
   const [residences, setResidences] = useState<Residence[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  
+
   // États du formulaire
   const [selectedResidenceId, setSelectedResidenceId] = useState<string>('');
+  const [residenceQuery, setResidenceQuery] = useState<string>('');
+  const [isResidenceOpen, setIsResidenceOpen] = useState<boolean>(false);
+  const residenceBoxRef = useRef<HTMLDivElement | null>(null);
+
   const [selectedTenantId, setSelectedTenantId] = useState<string>('');
+  const [tenantQuery, setTenantQuery] = useState<string>('');
+  const [isTenantOpen, setIsTenantOpen] = useState<boolean>(false);
+  const tenantBoxRef = useRef<HTMLDivElement | null>(null);
+
   const [checkIn, setCheckIn] = useState<string>('');
   const [checkOut, setCheckOut] = useState<string>('');
   const [discountAmount, setDiscountAmount] = useState<number>(0);
@@ -38,6 +47,22 @@ export default function CreateBookingForm() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Ferme les listes déroulantes lors d'un clic en dehors
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (residenceBoxRef.current && !residenceBoxRef.current.contains(target)) {
+        setIsResidenceOpen(false);
+      }
+      if (tenantBoxRef.current && !tenantBoxRef.current.contains(target)) {
+        setIsTenantOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
   // Charger la liste des résidences et locataires/clients actifs au chargement
   useEffect(() => {
     const fetchData = async () => {
@@ -47,7 +72,6 @@ export default function CreateBookingForm() {
 
         const [residencesRes, tenantsRes] = await Promise.all([
           fetch('http://localhost:3000/residences', { headers }),
-          // 1. Ajout de ?status=active pour demander au backend uniquement les clients actifs
           fetch('http://localhost:3000/clients?status=active', { headers }),
         ]);
 
@@ -55,13 +79,15 @@ export default function CreateBookingForm() {
           const residencesData = await residencesRes.json();
           const tenantsData = await tenantsRes.json();
 
-          // Extraction sécurisée des tableaux de données
-          const residencesList = Array.isArray(residencesData) ? residencesData : residencesData.data || [];
-          const tenantsList = Array.isArray(tenantsData) ? tenantsData : tenantsData.data || [];
+          const residencesList: Residence[] = Array.isArray(residencesData)
+            ? residencesData
+            : residencesData.data || [];
+          const tenantsList: Tenant[] = Array.isArray(tenantsData)
+            ? tenantsData
+            : tenantsData.data || [];
 
-          // 2. Filtrage côté client : Sécurité supplémentaire pour ne garder QUE les clients ayant isActive !== false
           const activeTenantsOnly = tenantsList.filter(
-            (tenant: { isActive?: boolean }) => tenant.isActive !== false
+            (tenant) => tenant.isActive !== false,
           );
 
           setResidences(residencesList);
@@ -84,10 +110,83 @@ export default function CreateBookingForm() {
     fetchData();
   }, []);
 
+  // Résidences filtrées selon la saisie
+  const filteredResidences = useMemo(() => {
+    const q = residenceQuery.trim().toLowerCase();
+    if (!q) return residences;
+    return residences.filter((r) => {
+      const label = `${r.name} ${Number(r.pricePerNight).toLocaleString('fr-FR')}`.toLowerCase();
+      return label.includes(q);
+    });
+  }, [residences, residenceQuery]);
+
+  // Clients filtrés selon la saisie (prénom, nom, nom complet, téléphone)
+  const filteredTenants = useMemo(() => {
+    const q = tenantQuery.trim().toLowerCase();
+    if (!q) return tenants;
+    return tenants.filter((t) => {
+      const fullName = `${t.firstName} ${t.lastName}`.toLowerCase();
+      const reverseName = `${t.lastName} ${t.firstName}`.toLowerCase();
+      const phone = (t.phone || '').toLowerCase();
+      return (
+        fullName.includes(q) ||
+        reverseName.includes(q) ||
+        phone.includes(q)
+      );
+    });
+  }, [tenants, tenantQuery]);
+
   // Résidence sélectionnée
   const selectedResidence = useMemo(() => {
     return residences.find((r) => r.id === selectedResidenceId) || null;
   }, [residences, selectedResidenceId]);
+
+  const handleResidenceInputChange = (value: string) => {
+    setResidenceQuery(value);
+    setIsResidenceOpen(true);
+    if (selectedResidence && value !== selectedResidence.name) {
+      setSelectedResidenceId('');
+    }
+  };
+
+  const handleSelectResidence = (residence: Residence) => {
+    if (!residence.isAvailable) return;
+    setSelectedResidenceId(residence.id);
+    setResidenceQuery(residence.name);
+    setIsResidenceOpen(false);
+  };
+
+  const handleClearResidence = () => {
+    setSelectedResidenceId('');
+    setResidenceQuery('');
+    setIsResidenceOpen(true);
+  };
+
+  const handleTenantInputChange = (value: string) => {
+    setTenantQuery(value);
+    setIsTenantOpen(true);
+    if (selectedTenantId) {
+      const current = tenants.find((t) => t.id === selectedTenantId);
+      const formattedCurrent = current
+        ? `${current.firstName} ${current.lastName} (${current.phone})`
+        : '';
+      if (value !== formattedCurrent) {
+        setSelectedTenantId('');
+      }
+    }
+  };
+
+  const handleSelectTenant = (tenant: Tenant) => {
+    setSelectedTenantId(tenant.id);
+    setTenantQuery(`${tenant.firstName} ${tenant.lastName} (${tenant.phone})`);
+    setIsTenantOpen(false);
+  };
+
+  const handleClearTenant = () => {
+    setSelectedTenantId('');
+    setTenantQuery('');
+    setIsTenantOpen(true);
+  };
 
   // Calcul dynamique du nombre de nuitées et des montants
   const { nightsCount, rawTotal, finalTotal } = useMemo(() => {
@@ -110,11 +209,20 @@ export default function CreateBookingForm() {
     return { nightsCount: nights, rawTotal: raw, finalTotal: final };
   }, [checkIn, checkOut, selectedResidence, discountAmount]);
 
-  
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccessMessage(null);
+
+    if (!selectedResidenceId) {
+      setError('Veuillez sélectionner une résidence disponible dans la liste.');
+      return;
+    }
+
+    if (!selectedTenantId) {
+      setError('Veuillez sélectionner un client dans la liste.');
+      return;
+    }
 
     if (nightsCount <= 0) {
       setError("La date de départ doit être strictement postérieure à la date d'arrivée.");
@@ -193,43 +301,168 @@ export default function CreateBookingForm() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+          {/* Combobox Résidence filtrable */}
+          <div ref={residenceBoxRef} className="relative">
+            <label
+              htmlFor="create-booking-residence"
+              className="block text-sm font-medium text-gray-700 mb-2"
+            >
               Sélectionner la Résidence *
             </label>
-            <select
-              required
-              value={selectedResidenceId}
-              onChange={(e) => setSelectedResidenceId(e.target.value)}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800"
-            >
-              <option value="">-- Choisir une résidence --</option>
-              {residences.map((r) => (
-                <option key={r.id} value={r.id} disabled={!r.isAvailable}>
-                  {r.name} ({r.pricePerNight.toLocaleString('fr-FR')} FCFA / nuit)
-                  {!r.isAvailable ? ' - Indisponible' : ''}
-                </option>
-              ))}
-            </select>
+            <div className="relative flex items-center">
+              <input
+                id="create-booking-residence"
+                type="text"
+                autoComplete="off"
+                value={residenceQuery}
+                onFocus={() => setIsResidenceOpen(true)}
+                onChange={(e) => handleResidenceInputChange(e.target.value)}
+                placeholder="Taper le nom d'une résidence..."
+                className="w-full px-4 py-2.5 pr-14 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800"
+              />
+              {residenceQuery && (
+                <button
+                  type="button"
+                  onClick={handleClearResidence}
+                  aria-label="Effacer la résidence"
+                  className="absolute right-8 text-gray-400 hover:text-red-600 text-xs font-bold px-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsResidenceOpen((prev) => !prev)}
+                aria-label="Ouvrir la liste des résidences"
+                className="absolute right-3 text-gray-500 hover:text-gray-800 text-xs font-bold px-1 cursor-pointer"
+              >
+                ▾
+              </button>
+            </div>
+
+            {isResidenceOpen && (
+              <div className="absolute z-30 mt-1 w-full max-h-60 overflow-y-auto rounded-lg border border-gray-300 bg-white shadow-lg">
+                {filteredResidences.length === 0 ? (
+                  <div className="px-4 py-3 text-xs text-gray-500">
+                    Aucune résidence trouvée pour &laquo; {residenceQuery} &raquo;.
+                  </div>
+                ) : (
+                  filteredResidences.map((r) => {
+                    const isSelected = selectedResidenceId === r.id;
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        disabled={!r.isAvailable}
+                        onClick={() => handleSelectResidence(r)}
+                        className={`w-full text-left px-4 py-2.5 text-sm border-b border-gray-100 last:border-b-0 transition ${
+                          !r.isAvailable
+                            ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
+                            : isSelected
+                              ? 'bg-indigo-600 text-white font-semibold cursor-pointer'
+                              : 'text-gray-800 hover:bg-indigo-50 cursor-pointer'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate">{r.name}</span>
+                          <span
+                            className={`text-xs font-medium shrink-0 ${
+                              isSelected ? 'text-indigo-100' : 'text-gray-600'
+                            }`}
+                          >
+                            {Number(r.pricePerNight).toLocaleString('fr-FR')} FCFA/nuit
+                          </span>
+                        </div>
+                        {!r.isAvailable && (
+                          <div className="text-[11px] text-red-500 mt-0.5">
+                            Indisponible
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+          {/* Combobox Client filtrable */}
+          <div ref={tenantBoxRef} className="relative">
+            <label
+              htmlFor="create-booking-tenant"
+              className="block text-sm font-medium text-gray-700 mb-2"
+            >
               Sélectionner le Client *
             </label>
-            <select
-              required
-              value={selectedTenantId}
-              onChange={(e) => setSelectedTenantId(e.target.value)}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800"
-            >
-              <option value="">-- Choisir un client --</option>
-              {tenants.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.firstName} {t.lastName} ({t.phone})
-                </option>
-              ))}
-            </select>
+            <div className="relative flex items-center">
+              <input
+                id="create-booking-tenant"
+                type="text"
+                autoComplete="off"
+                value={tenantQuery}
+                onFocus={() => setIsTenantOpen(true)}
+                onChange={(e) => handleTenantInputChange(e.target.value)}
+                placeholder="Taper un nom, prénom ou téléphone..."
+                className="w-full px-4 py-2.5 pr-14 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800"
+              />
+              {tenantQuery && (
+                <button
+                  type="button"
+                  onClick={handleClearTenant}
+                  aria-label="Effacer le client"
+                  className="absolute right-8 text-gray-400 hover:text-red-600 text-xs font-bold px-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsTenantOpen((prev) => !prev)}
+                aria-label="Ouvrir la liste des clients"
+                className="absolute right-3 text-gray-500 hover:text-gray-800 text-xs font-bold px-1 cursor-pointer"
+              >
+                ▾
+              </button>
+            </div>
+
+            {isTenantOpen && (
+              <div className="absolute z-30 mt-1 w-full max-h-60 overflow-y-auto rounded-lg border border-gray-300 bg-white shadow-lg">
+                {filteredTenants.length === 0 ? (
+                  <div className="px-4 py-3 text-xs text-gray-500">
+                    Aucun client trouvé pour &laquo; {tenantQuery} &raquo;.
+                  </div>
+                ) : (
+                  filteredTenants.map((t) => {
+                    const isSelected = selectedTenantId === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => handleSelectTenant(t)}
+                        className={`w-full text-left px-4 py-2.5 text-sm border-b border-gray-100 last:border-b-0 transition cursor-pointer ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white font-semibold'
+                            : 'text-gray-800 hover:bg-indigo-50'
+                        }`}
+                      >
+                        <div className="font-medium">
+                          {t.firstName} {t.lastName}
+                        </div>
+                        {t.phone && (
+                          <div
+                            className={`text-xs ${
+                              isSelected ? 'text-indigo-100' : 'text-gray-500'
+                            }`}
+                          >
+                            {t.phone}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
         </div>
 

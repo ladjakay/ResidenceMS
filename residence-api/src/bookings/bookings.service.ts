@@ -6,20 +6,37 @@ import {
   ConflictException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { BookingStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { logPaymentEvent } from '../audit/audit-events.helper';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
-import { BookingStatus } from '@prisma/client';
+
+export interface AuditActorContext {
+  userId?: string | null;
+  email?: string | null;
+  role?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
 
 @Injectable()
 export class BookingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   /**
    * Créer une réservation
    */
-  async create(createBookingDto: CreateBookingDto, createdById: string) {
+  async create(
+    createBookingDto: CreateBookingDto,
+    createdById: string,
+    auditCtx?: AuditActorContext,
+  ) {
     if (!createdById) {
       throw new UnauthorizedException(
         'Utilisateur non identifié. Veuillez vous reconnecter.',
@@ -71,10 +88,14 @@ export class BookingsService {
     });
 
     if (!tenant) {
-      throw new NotFoundException('Le client / locataire indiqué est introuvable.');
+      throw new NotFoundException(
+        'Le client / locataire indiqué est introuvable.',
+      );
     }
     if (!tenant.isActive) {
-      throw new BadRequestException('Ce client est désactivé. Impossible d\'effectuer une nouvelle réservation.');
+      throw new BadRequestException(
+        "Ce client est désactivé. Impossible d'effectuer une nouvelle réservation.",
+      );
     }
 
     const overlappingBooking = await this.prisma.booking.findFirst({
@@ -83,10 +104,7 @@ export class BookingsService {
         status: {
           notIn: [BookingStatus.CANCELLED, BookingStatus.REFUNDED],
         },
-        AND: [
-          { checkIn: { lt: endDate } },
-          { checkOut: { gt: startDate } },
-        ],
+        AND: [{ checkIn: { lt: endDate } }, { checkOut: { gt: startDate } }],
       },
     });
 
@@ -132,6 +150,28 @@ export class BookingsService {
       },
     });
 
+    await this.auditService.log({
+      actorId: auditCtx?.userId ?? createdById,
+      actorEmail: auditCtx?.email ?? booking.createdBy?.email ?? null,
+      actorRole: auditCtx?.role ?? null,
+      action: 'BOOKING_CREATED',
+      entity: 'Booking',
+      entityId: booking.id,
+      ipAddress: auditCtx?.ipAddress ?? null,
+      userAgent: auditCtx?.userAgent ?? null,
+      details: {
+        residenceId: booking.residenceId,
+        residenceName: booking.residence.name,
+        tenantId: booking.tenantId,
+        checkIn: booking.checkIn.toISOString(),
+        checkOut: booking.checkOut.toISOString(),
+        nightsCount: booking.nightsCount,
+        totalAmount: Number(booking.totalAmount),
+        discountAmount: Number(booking.discountAmount),
+        status: booking.status,
+      },
+    });
+
     return {
       message: 'Réservation créée avec succès.',
       data: booking,
@@ -146,7 +186,9 @@ export class BookingsService {
       where: status ? { status } : {},
       include: {
         residence: { select: { id: true, name: true, address: true } },
-        tenant: { select: { id: true, firstName: true, lastName: true, phone: true } },
+        tenant: {
+          select: { id: true, firstName: true, lastName: true, phone: true },
+        },
         createdBy: { select: { id: true, firstName: true, lastName: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -178,27 +220,37 @@ export class BookingsService {
   /**
    * Modifier le statut et le montant payé (PATCH /bookings/:id/status)
    */
-  async updateStatus(id: string, dto: UpdateBookingStatusDto) {
+  async updateStatus(
+    id: string,
+    dto: UpdateBookingStatusDto,
+    auditCtx?: AuditActorContext,
+  ) {
     const booking = await this.findOne(id);
     const currentStatus = booking.status;
     const newStatus = dto.status;
 
     if (currentStatus === BookingStatus.CANCELLED) {
-      throw new BadRequestException('Une réservation annulée ne peut plus être modifiée.');
+      throw new BadRequestException(
+        'Une réservation annulée ne peut plus être modifiée.',
+      );
     }
 
     if (currentStatus === BookingStatus.COMPLETED) {
-      throw new BadRequestException('Une réservation déjà terminée ne peut plus être modifiée.');
+      throw new BadRequestException(
+        'Une réservation déjà terminée ne peut plus être modifiée.',
+      );
     }
 
     const totalAmount = Number(booking.totalAmount);
-    let newPaidAmount = Number(booking.paidAmount ?? 0);
+    const previousPaidAmount = Number(booking.paidAmount ?? 0);
+    let newPaidAmount = previousPaidAmount;
 
-    // Règle CONFIRMED
     if (newStatus === BookingStatus.CONFIRMED) {
       if (dto.paidAmount !== undefined) {
         if (dto.paidAmount < 0) {
-          throw new BadRequestException('Le montant payé ne peut pas être négatif.');
+          throw new BadRequestException(
+            'Le montant payé ne peut pas être négatif.',
+          );
         }
         if (dto.paidAmount > totalAmount) {
           throw new BadRequestException(
@@ -208,7 +260,7 @@ export class BookingsService {
         newPaidAmount = dto.paidAmount;
       }
     }
-    // Règle COMPLETED
+
     if (newStatus === BookingStatus.COMPLETED) {
       newPaidAmount = totalAmount;
     }
@@ -228,6 +280,55 @@ export class BookingsService {
       },
     });
 
+    await this.auditService.log({
+      actorId: auditCtx?.userId ?? null,
+      actorEmail: auditCtx?.email ?? null,
+      actorRole: auditCtx?.role ?? null,
+      action: 'BOOKING_STATUS_CHANGED',
+      entity: 'Booking',
+      entityId: updatedBooking.id,
+      ipAddress: auditCtx?.ipAddress ?? null,
+      userAgent: auditCtx?.userAgent ?? null,
+      details: {
+        previousStatus: currentStatus,
+        newStatus,
+        previousPaidAmount,
+        newPaidAmount,
+        totalAmount,
+        cancellationReason: dto.cancellationReason ?? null,
+      },
+    });
+
+    if (newPaidAmount > previousPaidAmount) {
+      await logPaymentEvent(
+        this.auditService,
+        'PAYMENT_RECORDED',
+        updatedBooking.id,
+        {
+          amountPaidNow: newPaidAmount - previousPaidAmount,
+          previousPaidAmount,
+          newPaidAmount,
+          totalAmount,
+          status: newStatus,
+        },
+        auditCtx,
+      );
+    } else if (newPaidAmount < previousPaidAmount) {
+      await logPaymentEvent(
+        this.auditService,
+        'PAYMENT_REFUNDED',
+        updatedBooking.id,
+        {
+          refundAmount: previousPaidAmount - newPaidAmount,
+          previousPaidAmount,
+          newPaidAmount,
+          remainingPaid: newPaidAmount,
+          status: newStatus,
+        },
+        auditCtx,
+      );
+    }
+
     return {
       message: `Statut de la réservation mis à jour vers "${newStatus}".`,
       data: updatedBooking,
@@ -237,17 +338,24 @@ export class BookingsService {
   /**
    * Modifier les détails d'une réservation (PATCH /bookings/:id)
    */
-  async update(id: string, dto: UpdateBookingDto) {
+  async update(
+    id: string,
+    dto: UpdateBookingDto,
+    auditCtx?: AuditActorContext,
+  ) {
     const booking = await this.findOne(id);
     const totalAmount = Number(booking.totalAmount);
     const paidAmount = Number(booking.paidAmount ?? 0);
 
-    // Verrouillage 1 : CANCELLED ou COMPLETED
-    if (booking.status === BookingStatus.CANCELLED || booking.status === BookingStatus.COMPLETED) {
-      throw new BadRequestException('Une réservation annulée ou terminée ne peut plus être modifiée.');
+    if (
+      booking.status === BookingStatus.CANCELLED ||
+      booking.status === BookingStatus.COMPLETED
+    ) {
+      throw new BadRequestException(
+        'Une réservation annulée ou terminée ne peut plus être modifiée.',
+      );
     }
 
-    // Verrouillage 2 : CONFIRMED totalement payée
     if (booking.status === BookingStatus.CONFIRMED && paidAmount >= totalAmount) {
       throw new BadRequestException(
         'Une réservation confirmée et entièrement réglée ne peut plus être éditée.',
@@ -271,10 +379,7 @@ export class BookingsService {
         status: {
           notIn: [BookingStatus.CANCELLED, BookingStatus.REFUNDED],
         },
-        AND: [
-          { checkIn: { lt: endDate } },
-          { checkOut: { gt: startDate } },
-        ],
+        AND: [{ checkIn: { lt: endDate } }, { checkOut: { gt: startDate } }],
       },
     });
 
@@ -315,6 +420,33 @@ export class BookingsService {
       include: {
         residence: true,
         tenant: true,
+      },
+    });
+
+    await this.auditService.log({
+      actorId: auditCtx?.userId ?? null,
+      actorEmail: auditCtx?.email ?? null,
+      actorRole: auditCtx?.role ?? null,
+      action: 'BOOKING_UPDATED',
+      entity: 'Booking',
+      entityId: updatedBooking.id,
+      ipAddress: auditCtx?.ipAddress ?? null,
+      userAgent: auditCtx?.userAgent ?? null,
+      details: {
+        before: {
+          residenceId: booking.residenceId,
+          checkIn: booking.checkIn.toISOString(),
+          checkOut: booking.checkOut.toISOString(),
+          totalAmount,
+          discountAmount: Number(booking.discountAmount),
+        },
+        after: {
+          residenceId: updatedBooking.residenceId,
+          checkIn: updatedBooking.checkIn.toISOString(),
+          checkOut: updatedBooking.checkOut.toISOString(),
+          totalAmount: newTotalAmount,
+          discountAmount,
+        },
       },
     });
 

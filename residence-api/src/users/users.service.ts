@@ -1,24 +1,32 @@
+// src/users/users.service.ts
 import {
   Injectable,
   NotFoundException,
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { logUserManagementEvent } from '../audit/audit-events.helper';
+import { AuditActorContext } from '../bookings/bookings.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateUserPermissionsDto } from './dto/update-user-permissions.dto';
-import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   /**
    * Récupère la liste filtrée de tous les utilisateurs
    */
   async findAll(search?: string, status?: string, role?: string) {
-    const where: any = {};
+    const where: Prisma.UserWhereInput = {};
 
     if (status === 'active') where.isActive = true;
     if (status === 'desactive') where.isActive = false;
@@ -101,64 +109,86 @@ export class UsersService {
   /**
    * Création d'un nouvel utilisateur
    */
-  async create(dto: CreateUserDto) {
-  const existing = await this.prisma.user.findUnique({
-    where: { email: dto.email.toLowerCase() },
-  });
-  if (existing) {
-    throw new ConflictException('Un utilisateur avec cet email existe déjà.');
-  }
-
-  const roleObj = await this.prisma.role.findUnique({
-    where: { name: dto.role },
-  });
-  if (!roleObj) {
-    throw new BadRequestException(`Le rôle '${dto.role}' n'existe pas.`);
-  }
-
-  const hashedPassword = await bcrypt.hash(dto.password, 10);
-
-  return this.prisma.$transaction(async (tx) => {
-    // 1. Création de l'utilisateur
-    const newUser = await tx.user.create({
-      data: {
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        email: dto.email.toLowerCase(),
-        password: hashedPassword,
-        roleId: roleObj.id,
-      },
+  async create(dto: CreateUserDto, auditCtx?: AuditActorContext) {
+    const existing = await this.prisma.user.findUnique({
+      where: { email: dto.email.toLowerCase() },
     });
-
-    // 2. Attribution directe des permissions si fournies à la création
-    if (Array.isArray(dto.permissions) && dto.permissions.length > 0) {
-      const permsInDb = await tx.permission.findMany({
-        where: { code: { in: dto.permissions } },
-      });
-
-      if (permsInDb.length > 0) {
-        await tx.userPermission.createMany({
-          data: permsInDb.map((p) => ({
-            userId: newUser.id,
-            permissionId: p.id,
-          })),
-        });
-      }
+    if (existing) {
+      throw new ConflictException('Un utilisateur avec cet email existe déjà.');
     }
 
-    return {
-      id: newUser.id,
-      email: newUser.email,
-      firstName: newUser.firstName,
-      lastName: newUser.lastName,
-    };
-  });
-}
+    const roleObj = await this.prisma.role.findUnique({
+      where: { name: dto.role },
+    });
+    if (!roleObj) {
+      throw new BadRequestException(`Le rôle '${dto.role}' n'existe pas.`);
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: {
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          email: dto.email.toLowerCase(),
+          password: hashedPassword,
+          roleId: roleObj.id,
+        },
+      });
+
+      let assignedPermissionCodes: string[] = [];
+
+      if (Array.isArray(dto.permissions) && dto.permissions.length > 0) {
+        const permsInDb = await tx.permission.findMany({
+          where: { code: { in: dto.permissions } },
+        });
+
+        assignedPermissionCodes = permsInDb.map((p) => p.code);
+
+        if (permsInDb.length > 0) {
+          await tx.userPermission.createMany({
+            data: permsInDb.map((p) => ({
+              userId: newUser.id,
+              permissionId: p.id,
+            })),
+          });
+        }
+      }
+
+      return {
+        user: {
+          id: newUser.id,
+          email: newUser.email,
+          firstName: newUser.firstName,
+          lastName: newUser.lastName,
+        },
+        role: roleObj.name,
+        permissions: assignedPermissionCodes,
+      };
+    });
+
+    await logUserManagementEvent(
+      this.auditService,
+      'USER_CREATED',
+      result.user.id,
+      {
+        email: result.user.email,
+        firstName: result.user.firstName,
+        lastName: result.user.lastName,
+        role: result.role,
+        permissions: result.permissions,
+      },
+      auditCtx,
+    );
+
+    return result.user;
+  }
 
   /**
    * Mise à jour des informations de base
    */
-  async update(id: string, dto: UpdateUserDto) {
+  async update(id: string, dto: UpdateUserDto, auditCtx?: AuditActorContext) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Utilisateur introuvable.');
 
@@ -171,7 +201,7 @@ export class UsersService {
       }
     }
 
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: {
         firstName: dto.firstName,
@@ -179,26 +209,81 @@ export class UsersService {
         email: dto.email ? dto.email.toLowerCase() : undefined,
       },
     });
+
+    await logUserManagementEvent(
+      this.auditService,
+      'USER_UPDATED',
+      updated.id,
+      {
+        before: {
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+        },
+        after: {
+          firstName: updated.firstName,
+          lastName: updated.lastName,
+          email: updated.email,
+        },
+      },
+      auditCtx,
+    );
+
+    return updated;
   }
 
   /**
    * Active ou désactive un utilisateur
    */
-  async toggleStatus(id: string, isActive: boolean) {
+  async toggleStatus(
+    id: string,
+    isActive: boolean,
+    auditCtx?: AuditActorContext,
+  ) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Utilisateur introuvable.');
 
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: { isActive },
     });
+
+    await this.auditService.log({
+      actorId: auditCtx?.userId ?? null,
+      actorEmail: auditCtx?.email ?? null,
+      actorRole: auditCtx?.role ?? null,
+      action: isActive ? 'USER_ACTIVATED' : 'USER_DEACTIVATED',
+      entity: 'User',
+      entityId: updated.id,
+      ipAddress: auditCtx?.ipAddress ?? null,
+      userAgent: auditCtx?.userAgent ?? null,
+      details: {
+        targetEmail: updated.email,
+        previousIsActive: user.isActive,
+        newIsActive: updated.isActive,
+      },
+    });
+
+    return updated;
   }
 
   /**
    * Mise à jour atomique du rôle et/ou des permissions directes
    */
-  async updateRoleAndPermissions(id: string, dto: UpdateUserPermissionsDto) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+  async updateRoleAndPermissions(
+    id: string,
+    dto: UpdateUserPermissionsDto,
+    auditCtx?: AuditActorContext,
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: {
+        role: { select: { name: true } },
+        userPermissions: {
+          include: { permission: { select: { code: true } } },
+        },
+      },
+    });
     if (!user) throw new NotFoundException('Utilisateur introuvable.');
 
     const roleObj = await this.prisma.role.findUnique({
@@ -208,24 +293,28 @@ export class UsersService {
       throw new BadRequestException(`Le rôle '${dto.role}' n'existe pas.`);
     }
 
-    // Utilisation d'une transaction Prisma pour garantir l'atomicité
-    return this.prisma.$transaction(async (tx) => {
-      // 1. Mise à jour du rôle principal
+    const previousRole = user.role?.name ?? null;
+    const previousPermissions = user.userPermissions.map(
+      (up) => up.permission.code,
+    );
+
+    const txResult = await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id },
         data: { roleId: roleObj.id },
       });
 
-      // 2. Traitement des permissions si elles sont explicitement transmises dans le DTO
+      let appliedPermissions: string[] | undefined;
+
       if (Array.isArray(dto.permissions)) {
-        // Supprime les anciennes permissions directes
         await tx.userPermission.deleteMany({ where: { userId: id } });
 
-        // Insère la nouvelle liste
         if (dto.permissions.length > 0) {
           const permsInDb = await tx.permission.findMany({
             where: { code: { in: dto.permissions } },
           });
+
+          appliedPermissions = permsInDb.map((p) => p.code);
 
           const userPermData = permsInDb.map((p) => ({
             userId: id,
@@ -233,11 +322,29 @@ export class UsersService {
           }));
 
           await tx.userPermission.createMany({ data: userPermData });
+        } else {
+          appliedPermissions = [];
         }
       }
 
-      return { message: 'Permissions et rôle mis à jour avec succès.' };
+      return { appliedPermissions };
     });
+
+    await logUserManagementEvent(
+      this.auditService,
+      'USER_PERMISSIONS_UPDATED',
+      user.id,
+      {
+        targetEmail: user.email,
+        previousRole,
+        newRole: roleObj.name,
+        previousPermissions,
+        newPermissions: txResult.appliedPermissions ?? previousPermissions,
+      },
+      auditCtx,
+    );
+
+    return { message: 'Permissions et rôle mis à jour avec succès.' };
   }
 
   /**

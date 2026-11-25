@@ -1,7 +1,7 @@
 // src/app/users/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
@@ -39,6 +39,10 @@ export default function UsersManagementPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'desactive'>('all');
   const [roleFilter, setRoleFilter] = useState<string>('all');
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -159,6 +163,33 @@ export default function UsersManagementPage() {
     };
   }, [user]);
 
+  // Résumé calculé sur les utilisateurs retournés
+  const summaryStats = useMemo(() => {
+    const totalCount = users.length;
+    const activeCount = users.filter((u) => u.isActive).length;
+    const inactiveCount = totalCount - activeCount;
+    const superAdminCount = users.filter((u) => u.role === 'SUPER_ADMIN').length;
+    const gerantCount = users.filter((u) => u.role === 'GERANT').length;
+    const agentCount = users.filter((u) => u.role === 'AGENT').length;
+
+    return {
+      totalCount,
+      activeCount,
+      inactiveCount,
+      superAdminCount,
+      gerantCount,
+      agentCount,
+    };
+  }, [users]);
+
+  // Découpage paginé
+  const totalPages = Math.ceil(users.length / pageSize) || 1;
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const paginatedUsers = useMemo(() => {
+    const start = (safeCurrentPage - 1) * pageSize;
+    return users.slice(start, start + pageSize);
+  }, [users, safeCurrentPage, pageSize]);
+
   // Actions de sélection globale
   const handleSelectAllCreatePerms = () => {
     setCreatePermissions(availablePermissions.map((p) => p.code));
@@ -180,16 +211,19 @@ export default function UsersManagementPage() {
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setIsFetching(true);
     setSearch(e.target.value);
+    setCurrentPage(1);
   };
 
   const handleStatusFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setIsFetching(true);
     setStatusFilter(e.target.value as 'all' | 'active' | 'desactive');
+    setCurrentPage(1);
   };
 
   const handleRoleFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setIsFetching(true);
     setRoleFilter(e.target.value);
+    setCurrentPage(1);
   };
 
   const handleResetFilters = () => {
@@ -197,6 +231,7 @@ export default function UsersManagementPage() {
     setSearch('');
     setStatusFilter('all');
     setRoleFilter('all');
+    setCurrentPage(1);
   };
 
   // Création d'un utilisateur
@@ -369,6 +404,7 @@ export default function UsersManagementPage() {
           </p>
         </div>
         <button
+          type="button"
           onClick={() => {
             setFormData({ firstName: '', lastName: '', email: '', password: '', role: 'AGENT' });
             setCreatePermissions([]);
@@ -380,45 +416,105 @@ export default function UsersManagementPage() {
         </button>
       </div>
 
-      {/* Barre de Recherche et Filtres */}
-      <div className="bg-white p-4 rounded-lg shadow border border-gray-300 mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div>
-          <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Recherche</label>
-          <input
-            type="text"
-            placeholder="Nom, Prénom ou Email..."
-            value={search}
-            onChange={handleSearchChange}
-            className={inputStyle}
-          />
+      {/* Barre de Recherche, Filtres + Résumé */}
+      <div className="bg-white p-4 rounded-lg shadow border border-gray-300 mb-6 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div>
+            <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Recherche</label>
+            <input
+              type="text"
+              placeholder="Nom, Prénom ou Email..."
+              value={search}
+              onChange={handleSearchChange}
+              className={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Statut</label>
+            <select value={statusFilter} onChange={handleStatusFilterChange} className={selectStyle}>
+              <option value="all" className="text-gray-900 font-bold">Tous les statuts</option>
+              <option value="active" className="text-gray-900 font-bold">Actif uniquement</option>
+              <option value="desactive" className="text-gray-900 font-bold">Désactivé uniquement</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Rôle</label>
+            <select value={roleFilter} onChange={handleRoleFilterChange} className={selectStyle}>
+              <option value="all" className="text-gray-900 font-bold">Tous les rôles</option>
+              <option value="SUPER_ADMIN" className="text-gray-900 font-bold">SUPER_ADMIN</option>
+              <option value="GERANT" className="text-gray-900 font-bold">GERANT</option>
+              <option value="AGENT" className="text-gray-900 font-bold">AGENT</option>
+            </select>
+          </div>
+
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-900 text-sm rounded-md font-bold transition-colors border border-gray-300"
+            >
+              Réinitialiser
+            </button>
+          </div>
         </div>
 
-        <div>
-          <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Statut</label>
-          <select value={statusFilter} onChange={handleStatusFilterChange} className={selectStyle}>
-            <option value="all" className="text-gray-900 font-bold">Tous les statuts</option>
-            <option value="active" className="text-gray-900 font-bold">Actif uniquement</option>
-            <option value="desactive" className="text-gray-900 font-bold">Désactivé uniquement</option>
-          </select>
-        </div>
+        {/* Résumé en bas de la zone des critères */}
+        <div className="pt-3 border-t border-gray-200 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <span className="block text-[11px] font-black text-blue-800 uppercase tracking-wider">
+              Utilisateurs trouvés
+            </span>
+            <span className="text-lg font-black text-blue-900">
+              {summaryStats.totalCount}
+            </span>
+          </div>
 
-        <div>
-          <label className="block text-xs font-bold text-gray-900 uppercase mb-1">Rôle</label>
-          <select value={roleFilter} onChange={handleRoleFilterChange} className={selectStyle}>
-            <option value="all" className="text-gray-900 font-bold">Tous les rôles</option>
-            <option value="SUPER_ADMIN" className="text-gray-900 font-bold">SUPER_ADMIN</option>
-            <option value="GERANT" className="text-gray-900 font-bold">GERANT</option>
-            <option value="AGENT" className="text-gray-900 font-bold">AGENT</option>
-          </select>
-        </div>
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+            <span className="block text-[11px] font-black text-emerald-800 uppercase tracking-wider">
+              Actifs
+            </span>
+            <span className="text-lg font-black text-emerald-900">
+              {summaryStats.activeCount}
+            </span>
+          </div>
 
-        <div className="flex items-end">
-          <button
-            onClick={handleResetFilters}
-            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-900 text-sm rounded-md font-bold transition-colors border border-gray-300"
-          >
-            Réinitialiser
-          </button>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+            <span className="block text-[11px] font-black text-red-800 uppercase tracking-wider">
+              Désactivés
+            </span>
+            <span className="text-lg font-black text-red-900">
+              {summaryStats.inactiveCount}
+            </span>
+          </div>
+
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+            <span className="block text-[11px] font-black text-purple-800 uppercase tracking-wider">
+              Super Admins
+            </span>
+            <span className="text-lg font-black text-purple-900">
+              {summaryStats.superAdminCount}
+            </span>
+          </div>
+
+          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+            <span className="block text-[11px] font-black text-indigo-800 uppercase tracking-wider">
+              Gérants
+            </span>
+            <span className="text-lg font-black text-indigo-900">
+              {summaryStats.gerantCount}
+            </span>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <span className="block text-[11px] font-black text-slate-700 uppercase tracking-wider">
+              Agents
+            </span>
+            <span className="text-lg font-black text-slate-900">
+              {summaryStats.agentCount}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -429,91 +525,145 @@ export default function UsersManagementPage() {
         </div>
       )}
 
-      {/* Tableau des Utilisateurs */}
-      <div className="bg-white rounded-lg shadow border border-gray-300 overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-gray-100 border-b border-gray-300 text-xs text-gray-900 uppercase font-black">
-              <th className="p-4">Utilisateur</th>
-              <th className="p-4">Email</th>
-              <th className="p-4">Rôle</th>
-              <th className="p-4">Statut</th>
-              <th className="p-4 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 text-sm text-gray-900 font-semibold">
-            {isFetching ? (
-              <tr>
-                <td colSpan={5} className="p-6 text-center text-gray-800 font-bold">
-                  Chargement de la liste...
-                </td>
+      {/* Tableau paginé des Utilisateurs */}
+      <div className="space-y-4">
+        <div className="bg-white rounded-lg shadow border border-gray-300 overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-gray-100 border-b border-gray-300 text-xs text-gray-900 uppercase font-black">
+                <th className="p-4">Utilisateur</th>
+                <th className="p-4">Email</th>
+                <th className="p-4">Rôle</th>
+                <th className="p-4">Statut</th>
+                <th className="p-4 text-right">Actions</th>
               </tr>
-            ) : users.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="p-6 text-center text-gray-800 font-bold">
-                  Aucun utilisateur trouvé.
-                </td>
-              </tr>
-            ) : (
-              users.map((u) => (
-                <tr key={u.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="p-4 font-black text-gray-900">
-                    {u.firstName || ''} {u.lastName || ''}
-                  </td>
-                  <td className="p-4 text-gray-900 font-bold">{u.email}</td>
-                  <td className="p-4">
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-black ${
-                        u.role === 'SUPER_ADMIN'
-                          ? 'bg-purple-100 text-purple-900 border border-purple-300'
-                          : u.role === 'GERANT'
-                          ? 'bg-blue-100 text-blue-900 border border-blue-300'
-                          : 'bg-gray-200 text-gray-900 border border-gray-400'
-                      }`}
-                    >
-                      {u.role}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-black ${
-                        u.isActive
-                          ? 'bg-green-100 text-green-900 border border-green-300'
-                          : 'bg-red-100 text-red-900 border border-red-300'
-                      }`}
-                    >
-                      {u.isActive ? 'Actif' : 'Désactivé'}
-                    </span>
-                  </td>
-                  <td className="p-4 text-right space-x-2">
-                    <button
-                      onClick={() => openEditModal(u)}
-                      className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-900 rounded text-xs font-bold border border-gray-300"
-                    >
-                      Éditer
-                    </button>
-                    <button
-                      onClick={() => openRolePermModal(u)}
-                      className="px-3 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-950 rounded text-xs font-bold border border-indigo-300"
-                    >
-                      Rôles & Permissions
-                    </button>
-                    <button
-                      onClick={() => handleToggleStatus(u)}
-                      className={`px-3 py-1 rounded text-xs font-bold text-white shadow-sm ${
-                        u.isActive
-                          ? 'bg-red-600 hover:bg-red-700'
-                          : 'bg-green-600 hover:bg-green-700'
-                      }`}
-                    >
-                      {u.isActive ? 'Désactiver' : 'Activer'}
-                    </button>
+            </thead>
+            <tbody className="divide-y divide-gray-200 text-sm text-gray-900 font-semibold">
+              {isFetching ? (
+                <tr>
+                  <td colSpan={5} className="p-6 text-center text-gray-800 font-bold">
+                    Chargement de la liste...
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : paginatedUsers.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-6 text-center text-gray-800 font-bold">
+                    Aucun utilisateur trouvé.
+                  </td>
+                </tr>
+              ) : (
+                paginatedUsers.map((u) => (
+                  <tr key={u.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="p-4 font-black text-gray-900">
+                      {u.firstName || ''} {u.lastName || ''}
+                    </td>
+                    <td className="p-4 text-gray-900 font-bold">{u.email}</td>
+                    <td className="p-4">
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-black ${
+                          u.role === 'SUPER_ADMIN'
+                            ? 'bg-purple-100 text-purple-900 border border-purple-300'
+                            : u.role === 'GERANT'
+                            ? 'bg-blue-100 text-blue-900 border border-blue-300'
+                            : 'bg-gray-200 text-gray-900 border border-gray-400'
+                        }`}
+                      >
+                        {u.role}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-black ${
+                          u.isActive
+                            ? 'bg-green-100 text-green-900 border border-green-300'
+                            : 'bg-red-100 text-red-900 border border-red-300'
+                        }`}
+                      >
+                        {u.isActive ? 'Actif' : 'Désactivé'}
+                      </span>
+                    </td>
+                    <td className="p-4 text-right space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(u)}
+                        className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-900 rounded text-xs font-bold border border-gray-300"
+                      >
+                        Éditer
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openRolePermModal(u)}
+                        className="px-3 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-950 rounded text-xs font-bold border border-indigo-300"
+                      >
+                        Rôles & Permissions
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStatus(u)}
+                        className={`px-3 py-1 rounded text-xs font-bold text-white shadow-sm ${
+                          u.isActive
+                            ? 'bg-red-600 hover:bg-red-700'
+                            : 'bg-green-600 hover:bg-green-700'
+                        }`}
+                      >
+                        {u.isActive ? 'Désactiver' : 'Activer'}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Contrôles de pagination */}
+        {!isFetching && users.length > 0 && (
+          <div className="bg-white border border-gray-300 rounded-lg p-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-bold text-gray-900 shadow">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span>Afficher</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="border border-gray-300 rounded px-2 py-1 bg-white text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-600 cursor-pointer"
+              >
+                <option value={10}>10 par page</option>
+                <option value={20}>20 par page</option>
+                <option value={50}>50 par page</option>
+              </select>
+              <span className="text-gray-700">
+                (Affichage de {(safeCurrentPage - 1) * pageSize + 1} à{' '}
+                {Math.min(safeCurrentPage * pageSize, users.length)} sur {users.length})
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={safeCurrentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="px-3 py-1.5 border border-gray-300 rounded bg-gray-50 hover:bg-gray-100 text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Précédent
+              </button>
+
+              <span>
+                Page {safeCurrentPage} / {totalPages}
+              </span>
+
+              <button
+                type="button"
+                disabled={safeCurrentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="px-3 py-1.5 border border-gray-300 rounded bg-gray-50 hover:bg-gray-100 text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Suivant
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* MODAL 1 : CRÉER UN UTILISATEUR */}
