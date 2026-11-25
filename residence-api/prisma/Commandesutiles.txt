@@ -1,0 +1,10 @@
+# 1. Nettoyer en conservant le SUPER_ADMIN et ses permissions
+npx ts-node prisma/resetdb.ts
+
+# 2. Réinitialiser / vérifier rôles, permissions et compte SUPER_ADMIN
+npx ts-node prisma/seed.ts
+
+# 3. Lancer la montée en charge (volumes ajustables via variables d'env)
+npx ts-node prisma/loadtest.ts
+# Exemple avec volumes personnalisés :
+# LOAD_USERS=50 LOAD_RESIDENCES=40 LOAD_TENANTS=100 LOAD_BOOKINGS=300 npx ts-node prisma/loadtest.ts

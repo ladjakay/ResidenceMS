@@ -1,147 +1,184 @@
-// prisma/seed-load-test.ts
-import { PrismaClient, BookingStatus } from '@prisma/client';
-import { fakerFR as faker } from '@faker-js/faker';
+// prisma/loadtest.ts
+import { BookingStatus, PrismaClient } from '@prisma/client';
+import { faker } from '@faker-js/faker';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
-// Cibles de charge
-const TARGET_USERS = 20;
-const TARGET_RESIDENCES = 30;
-const TARGET_TENANTS = 50;
-const TARGET_BOOKINGS = 70;
+// Volumes configurables via variables d'environnement
+const USERS_COUNT = Number(process.env.LOAD_USERS || 25);
+const RESIDENCES_COUNT = Number(process.env.LOAD_RESIDENCES || 30);
+const TENANTS_COUNT = Number(process.env.LOAD_TENANTS || 60);
+const BOOKINGS_COUNT = Number(process.env.LOAD_BOOKINGS || 120);
+
+const QUARTIERS = [
+  'Cocody Riviera',
+  'Marcory Zone 4',
+  'Plateau',
+  'Yopougon',
+  'Bingerville',
+  'Assinie',
+];
+
+const STATUS_POOL: BookingStatus[] = [
+  BookingStatus.PENDING,
+  BookingStatus.CONFIRMED,
+  BookingStatus.COMPLETED,
+  BookingStatus.CANCELLED,
+];
+
+function pickRandomSubset<T>(arr: readonly T[], minItems: number, maxItems: number): T[] {
+  const shuffled = faker.helpers.shuffle([...arr]);
+  const count = Math.min(shuffled.length, faker.number.int({ min: minItems, max: maxItems }));
+  return shuffled.slice(0, count);
+}
 
 async function main() {
-  console.log('🚀 Démarrage de la génération du test de charge...');
+  console.log('🚀 Démarrage du script de montée en charge ResidenceMS (avec Faker)...\n');
 
-  // 1. Récupération ou création d'un rôle par défaut (GERANT / AGENT)
-  let role = await prisma.role.findFirst({
-    where: { name: { in: ['GERANT', 'AGENT', 'SUPER_ADMIN'] } },
-  });
+  const [roles, permissions, existingSuperAdmin] = await Promise.all([
+    prisma.role.findMany(),
+    prisma.permission.findMany(),
+    prisma.user.findFirst({
+      where: { role: { name: 'SUPER_ADMIN' } },
+    }),
+  ]);
 
-  if (!role) {
-    console.log('⚠️ Aucun rôle trouvé. Création du rôle AGENT...');
-    role = await prisma.role.create({
-      data: { name: 'AGENT' },
-    });
+  if (roles.length === 0 || permissions.length === 0) {
+    throw new Error(
+      'Les rôles ou permissions sont absents. Exécutez d’abord `npx ts-node prisma/seed.ts`.',
+    );
   }
 
-  // Mot de passe générique haché pour tous les utilisateurs fictifs
-  const defaultPasswordHash = await bcrypt.hash('Password123', 10);
+  const rolePool = roles.filter((r) => r.name !== 'SUPER_ADMIN');
+  const effectiveRolePool = rolePool.length > 0 ? rolePool : roles;
+  const defaultPasswordHash = await bcrypt.hash('test123', 10);
+  const runStamp = Date.now();
 
-  // 2. Génération des 20 Utilisateurs
-  console.log(`👤 Création de ${TARGET_USERS} utilisateurs fictifs...`);
-  const userIds: string[] = [];
-
-  for (let i = 0; i < TARGET_USERS; i++) {
+  // 1. Création d'utilisateurs avec rôle aléatoire et permissions aléatoires
+  const createdUsers = [];
+  for (let i = 1; i <= USERS_COUNT; i++) {
     const firstName = faker.person.firstName();
     const lastName = faker.person.lastName();
-    const email = faker.internet
-      .email({ firstName, lastName, provider: 'residence-test.local' })
-      .toLowerCase();
+    const chosenRole = faker.helpers.arrayElement(effectiveRolePool);
+    const chosenPerms = pickRandomSubset(permissions, 1, permissions.length);
 
-    const user = await prisma.user.upsert({
-      where: { email },
-      update: {},
-      create: {
-        email,
-        password: defaultPasswordHash,
+    const uniqueEmail = faker.internet
+      .email({
         firstName,
         lastName,
-        isActive: faker.datatype.boolean(0.9), // 90% d'utilisateurs actifs
-        roleId: role.id,
+        provider: `load.${runStamp}.${i}.residencems.test`,
+      })
+      .toLowerCase();
+
+    const user = await prisma.user.create({
+      data: {
+        firstName,
+        lastName,
+        email: uniqueEmail,
+        password: defaultPasswordHash,
+        isActive: faker.datatype.boolean({ probability: 0.85 }),
+        roleId: chosenRole.id,
+        userPermissions: {
+          create: chosenPerms.map((p) => ({
+            permissionId: p.id,
+          })),
+        },
       },
     });
-    userIds.push(user.id);
+
+    createdUsers.push(user);
   }
+  console.log(`- ${createdUsers.length} utilisateur(s) créé(s) avec rôles et permissions aléatoires.`);
 
-  // 3. Génération des 30 Résidences
-  console.log(`🏡 Création de ${TARGET_RESIDENCES} résidences fictives...`);
-  const residenceIds: { id: string; pricePerNight: number }[] = [];
+  // 2. Création de résidences
+  const createdResidences = [];
+  for (let i = 1; i <= RESIDENCES_COUNT; i++) {
+    const quartier = faker.helpers.arrayElement(QUARTIERS);
+    const pricePerNight = faker.number.int({ min: 25, max: 180 }) * 1000;
 
-  for (let i = 0; i < TARGET_RESIDENCES; i++) {
     const residence = await prisma.residence.create({
       data: {
-        name: `Résidence ${faker.location.street()} - N°${faker.number.int({ min: 1, max: 200 })}`,
-        address: `${faker.location.streetAddress()}, ${faker.location.city()}`,
-        pricePerNight: faker.number.int({ min: 15000, max: 150000 }), // Prix entre 15k et 150k FCFA
-        isAvailable: faker.datatype.boolean(0.85),
-        isActive: true,
+        name: `Résidence ${faker.person.lastName()} - ${quartier} #${i}`,
+        address: `${faker.location.streetAddress()}, ${quartier}`,
+        pricePerNight,
+        isAvailable: faker.datatype.boolean({ probability: 0.8 }),
+        isActive: faker.datatype.boolean({ probability: 0.9 }),
       },
     });
-    residenceIds.push({
-      id: residence.id,
-      pricePerNight: Number(residence.pricePerNight),
-    });
+    createdResidences.push(residence);
   }
+  console.log(`- ${createdResidences.length} résidence(s) créée(s).`);
 
-  // 4. Génération des 50 Clients (Tenants)
-  console.log(`👥 Création de ${TARGET_TENANTS} clients fictifs...`);
-  const tenantIds: string[] = [];
-
-  for (let i = 0; i < TARGET_TENANTS; i++) {
+  // 3. Création de clients / locataires (Tenant)
+  const createdTenants = [];
+  for (let i = 1; i <= TENANTS_COUNT; i++) {
     const firstName = faker.person.firstName();
     const lastName = faker.person.lastName();
-    const email = faker.internet.email({ firstName, lastName }).toLowerCase();
+    const uniqueEmail = faker.internet
+      .email({
+        firstName,
+        lastName,
+        provider: `client.${runStamp}.${i}.example.test`,
+      })
+      .toLowerCase();
 
     const tenant = await prisma.tenant.create({
       data: {
         firstName,
         lastName,
-        email,
-        phone: faker.phone.number({ style: 'national' }),
-        isActive: faker.datatype.boolean(0.95),
+        phone: `07${faker.number.int({ min: 10, max: 99 })}${faker.number.int({
+          min: 100000,
+          max: 999999,
+        })}`,
+        email: uniqueEmail,
+        isActive: faker.datatype.boolean({ probability: 0.9 }),
       },
     });
-    tenantIds.push(tenant.id);
+    createdTenants.push(tenant);
   }
+  console.log(`- ${createdTenants.length} client(s)/locataire(s) créé(s).`);
 
-  // 5. Génération des 70 Réservations avec répartition de statuts et dates réelles
-  console.log(`📅 Création de ${TARGET_BOOKINGS} réservations fictives...`);
-  const statuses: BookingStatus[] = [
-    BookingStatus.PENDING,
-    BookingStatus.CONFIRMED,
-    BookingStatus.COMPLETED,
-    BookingStatus.CANCELLED,
-    BookingStatus.REFUNDED,
-  ];
+  // 4. Création de réservations (Booking)
+  const creators = existingSuperAdmin ? [existingSuperAdmin, ...createdUsers] : createdUsers;
+  let bookingsCreated = 0;
 
-  for (let i = 0; i < TARGET_BOOKINGS; i++) {
-    const residence = faker.helpers.arrayElement(residenceIds);
-    const tenantId = faker.helpers.arrayElement(tenantIds);
-    const createdById = faker.helpers.arrayElement(userIds);
-    const status = faker.helpers.arrayElement(statuses);
+  for (let i = 0; i < BOOKINGS_COUNT; i++) {
+    const residence = faker.helpers.arrayElement(createdResidences);
+    const tenant = faker.helpers.arrayElement(createdTenants);
+    const creator = faker.helpers.arrayElement(creators);
 
-    // Dates aléatoires (entre il y a 60 jours et dans 60 jours)
-    const checkIn = faker.date.between({
-      from: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000),
-      to: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
-    });
     const nightsCount = faker.number.int({ min: 1, max: 14 });
-    const checkOut = new Date(checkIn.getTime() + nightsCount * 24 * 60 * 60 * 1000);
+    const dayOffset = faker.number.int({ min: -30, max: 45 });
+    const checkIn = new Date();
+    checkIn.setDate(checkIn.getDate() + dayOffset);
+    checkIn.setHours(14, 0, 0, 0);
 
-    const pricePerNight = residence.pricePerNight;
-    const rawTotal = pricePerNight * nightsCount;
-    const discountAmount = faker.datatype.boolean(0.2)
-      ? faker.number.int({ min: 2000, max: 10000 })
+    const checkOut = new Date(checkIn);
+    checkOut.setDate(checkOut.getDate() + nightsCount);
+    checkOut.setHours(11, 0, 0, 0);
+
+    const pricePerNight = Number(residence.pricePerNight);
+    const discountAmount = faker.datatype.boolean({ probability: 0.25 })
+      ? faker.number.int({ min: 1, max: 5 }) * 5000
       : 0;
-    const totalAmount = Math.max(0, rawTotal - discountAmount);
+    const totalAmount = Math.max(0, nightsCount * pricePerNight - discountAmount);
+    const status = faker.helpers.arrayElement(STATUS_POOL);
 
-    // Calcul logique du montant payé selon le statut
     let paidAmount = 0;
-    if (status === BookingStatus.CONFIRMED) {
-      paidAmount = faker.number.int({ min: Math.round(totalAmount * 0.3), max: totalAmount });
-    } else if (status === BookingStatus.COMPLETED) {
+    if (status === BookingStatus.COMPLETED) {
       paidAmount = totalAmount;
-    } else if (status === BookingStatus.REFUNDED) {
-      paidAmount = 0;
+    } else if (status === BookingStatus.CONFIRMED) {
+      paidAmount = faker.datatype.boolean({ probability: 0.6 })
+        ? totalAmount
+        : Math.round(totalAmount * 0.5);
     }
 
     await prisma.booking.create({
       data: {
         residenceId: residence.id,
-        tenantId,
-        createdById,
+        tenantId: tenant.id,
+        createdById: creator.id,
         checkIn,
         checkOut,
         nightsCount,
@@ -150,22 +187,20 @@ async function main() {
         discountAmount,
         paidAmount,
         status,
-        notes: faker.datatype.boolean(0.3) ? faker.lorem.sentence() : null,
+        notes: faker.datatype.boolean({ probability: 0.5 })
+          ? faker.lorem.sentence({ min: 4, max: 9 })
+          : `Données de montée en charge #${i + 1}`,
       },
     });
+    bookingsCreated++;
   }
-
-  console.log('✅ Génération terminée avec succès !');
-  console.log(`📊 Bilan :`);
-  console.log(`   - Utilisateurs : ${TARGET_USERS}`);
-  console.log(`   - Résidences   : ${TARGET_RESIDENCES}`);
-  console.log(`   - Clients      : ${TARGET_TENANTS}`);
-  console.log(`   - Réservations : ${TARGET_BOOKINGS}`);
+  console.log(`- ${bookingsCreated} réservation(s) créée(s).`);
+  console.log('\n✅ Montée en charge terminée avec succès !');
 }
 
 main()
-  .catch((e) => {
-    console.error('❌ Erreur lors du seeding :', e);
+  .catch((err: unknown) => {
+    console.error('❌ Erreur lors de la montée en charge :', err);
     process.exit(1);
   })
   .finally(async () => {
