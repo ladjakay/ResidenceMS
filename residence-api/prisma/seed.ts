@@ -5,15 +5,24 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 const PERMISSIONS_SEED = [
-  { code: 'booking:read', description: 'Consulter la liste des réservations' },
+
   { code: 'booking:create', description: 'Créer une réservation' },
   { code: 'booking:edit', description: 'Modifier une réservation' },
-  { code: 'client:read', description: 'Consulter la liste et les détails des clients' },
+  { code: 'booking:read', description: 'Consulter la liste des réservations' },
+
   { code: 'client:create', description: 'Créer un nouveau client' },
-  { code: 'client:update', description: "Modifier les informations d'un client" },
   { code: 'client:delete', description: 'Désactiver ou réactiver un client' },
+  { code: 'client:read', description: 'Consulter la liste et les détails des clients' },
+  { code: 'client:update', description: "Modifier les informations d'un client" },
+
   { code: 'finance:view', description: "Consulter le chiffre d'affaires" },
+  
   { code: 'permissions:manage', description: 'Gérer les utilisateurs et rôles' },
+
+  { code: 'residence:create', description: 'Créer une nouvelle résidence' },
+  { code: 'residence:delete', description: 'Désactiver ou réactiver une résidence' },
+  { code: 'residence:read', description: 'Consulter la liste et les détails des résidences' },
+  { code: 'residence:update', description: "Modifier les informations d'une résidence" },
 ];
 
 const ROLES_SEED = ['SUPER_ADMIN', 'GERANT', 'AGENT'] as const;
