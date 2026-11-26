@@ -58,15 +58,7 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
-        role: {
-          include: {
-            permissions: {
-              include: {
-                permission: true,
-              },
-            },
-          },
-        },
+        role: true,
         userPermissions: {
           include: {
             permission: true,
@@ -79,10 +71,9 @@ export class AuthService {
       throw new UnauthorizedException('Compte inactif ou introuvable.');
     }
 
-    const permissionSet = new Set<string>([
-      ...user.role.permissions.map((rp) => rp.permission.code),
-      ...user.userPermissions.map((up) => up.permission.code),
-    ]);
+    const permissionSet = new Set<string>(
+      user.userPermissions.map((up) => up.permission.code),
+    );
 
     return {
       ...user,

@@ -16,7 +16,6 @@ const PERMISSIONS_SEED = [
   { code: 'client:update', description: "Modifier les informations d'un client" },
 
   { code: 'finance:view', description: "Consulter le chiffre d'affaires" },
-  
   { code: 'permissions:manage', description: 'Gérer les utilisateurs et rôles' },
 
   { code: 'residence:create', description: 'Créer une nouvelle résidence' },
