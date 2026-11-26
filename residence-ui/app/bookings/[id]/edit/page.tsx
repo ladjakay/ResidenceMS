@@ -20,6 +20,10 @@ interface BookingDetail {
   residence?: { id: string; name: string; pricePerNight: number };
 }
 
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
+).replace(/\/+$/, '');
+
 export default function EditBookingPage() {
   const router = useRouter();
   const params = useParams();
@@ -43,7 +47,7 @@ export default function EditBookingPage() {
       localStorage.getItem('access_token') ||
       localStorage.getItem('accessToken');
 
-    fetch(`http://localhost:3000/bookings/${bookingId}`, {
+    fetch(`${API_BASE_URL}/bookings/${bookingId}`, {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
@@ -106,7 +110,7 @@ export default function EditBookingPage() {
         localStorage.getItem('access_token') ||
         localStorage.getItem('accessToken');
 
-      const response = await fetch(`http://localhost:3000/bookings/${bookingId}`, {
+      const response = await fetch(`${API_BASE_URL}/bookings/${bookingId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

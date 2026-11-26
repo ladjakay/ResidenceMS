@@ -35,6 +35,10 @@ interface TenantOption {
   isActive?: boolean;
 }
 
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
+).replace(/\/+$/, '');
+
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -122,7 +126,7 @@ export default function BookingsPage() {
   const fetchBookingsData = useCallback(async () => {
     const token = getToken();
 
-    const response = await fetch('http://localhost:3000/bookings', {
+    const response = await fetch(`${API_BASE_URL}/bookings`, {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
@@ -188,8 +192,8 @@ export default function BookingsPage() {
 
     try {
       const [resRes, tenRes] = await Promise.all([
-        fetch('http://localhost:3000/residences', { headers }),
-        fetch('http://localhost:3000/tenants', { headers }),
+        fetch(`${API_BASE_URL}/residences`, { headers }),
+        fetch(`${API_BASE_URL}/tenants`, { headers }),
       ]);
 
       const resData = resRes.ok ? await resRes.json() : [];
@@ -342,7 +346,7 @@ export default function BookingsPage() {
         notes: formData.notes.trim() || undefined,
       };
 
-      const response = await fetch('http://localhost:3000/bookings', {
+      const response = await fetch(`${API_BASE_URL}/bookings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -539,7 +543,7 @@ export default function BookingsPage() {
       const token = getToken();
 
       const response = await fetch(
-        `http://localhost:3000/bookings/${bookingId}/status`,
+        `${API_BASE_URL}/bookings/${bookingId}/status`,
         {
           method: 'PATCH',
           headers: {

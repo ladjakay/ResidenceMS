@@ -22,6 +22,10 @@ interface User {
   permissions?: string[];
 }
 
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
+).replace(/\/+$/, '');
+
 export default function UsersManagementPage() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
@@ -105,7 +109,7 @@ export default function UsersManagementPage() {
         if (statusFilter !== 'all') queryParams.append('status', statusFilter);
         if (roleFilter !== 'all') queryParams.append('role', roleFilter);
 
-        const res = await fetch(`http://localhost:3000/users?${queryParams.toString()}`, {
+        const res = await fetch(`${API_BASE_URL}/users?${queryParams.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -143,7 +147,7 @@ export default function UsersManagementPage() {
     async function loadPermissions() {
       try {
         const token = localStorage.getItem('access_token');
-        const res = await fetch('http://localhost:3000/permissions', {
+        const res = await fetch(`${API_BASE_URL}/permissions`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -239,7 +243,7 @@ export default function UsersManagementPage() {
     e.preventDefault();
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch('http://localhost:3000/users', {
+      const res = await fetch(`${API_BASE_URL}/users`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -272,7 +276,7 @@ export default function UsersManagementPage() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch(`http://localhost:3000/users/${selectedUser.id}`, {
+      const res = await fetch(`${API_BASE_URL}/users/${selectedUser.id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -305,7 +309,7 @@ export default function UsersManagementPage() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch(`http://localhost:3000/users/${targetUser.id}/status`, {
+      const res = await fetch(`${API_BASE_URL}/users/${targetUser.id}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -327,7 +331,7 @@ export default function UsersManagementPage() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch(`http://localhost:3000/users/${selectedUser.id}/permissions`, {
+      const res = await fetch(`${API_BASE_URL}/users/${selectedUser.id}/permissions`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

@@ -17,6 +17,10 @@ interface Residence {
   _count?: { bookings: number };
 }
 
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
+).replace(/\/+$/, '');
+
 export default function ResidencesPage() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
@@ -76,7 +80,7 @@ export default function ResidencesPage() {
         if (statusFilter !== 'all') params.append('status', statusFilter);
         if (onlyAvailable) params.append('available', 'true');
 
-        const res = await fetch(`http://localhost:3000/residences?${params.toString()}`, {
+        const res = await fetch(`${API_BASE_URL}/residences?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -164,8 +168,8 @@ export default function ResidencesPage() {
       };
 
       const url = editingResidence
-        ? `http://localhost:3000/residences/${editingResidence.id}`
-        : 'http://localhost:3000/residences';
+        ? `${API_BASE_URL}/residences/${editingResidence.id}`
+        : `${API_BASE_URL}/residences`;
       const method = editingResidence ? 'PATCH' : 'POST';
 
       const res = await fetch(url, {
@@ -203,7 +207,7 @@ export default function ResidencesPage() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch(`http://localhost:3000/residences/${r.id}/status`, {
+      const res = await fetch(`${API_BASE_URL}/residences/${r.id}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

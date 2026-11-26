@@ -18,6 +18,10 @@ interface Tenant {
   isActive?: boolean;
 }
 
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
+).replace(/\/+$/, '');
+
 export default function CreateBookingForm() {
   const router = useRouter();
 
@@ -71,8 +75,8 @@ export default function CreateBookingForm() {
         const headers = { Authorization: `Bearer ${token}` };
 
         const [residencesRes, tenantsRes] = await Promise.all([
-          fetch('http://localhost:3000/residences', { headers }),
-          fetch('http://localhost:3000/clients?status=active', { headers }),
+          fetch(`${API_BASE_URL}/residences`, { headers }),
+          fetch(`${API_BASE_URL}/clients?status=active`, { headers }),
         ]);
 
         if (residencesRes.ok && tenantsRes.ok) {
@@ -233,7 +237,7 @@ export default function CreateBookingForm() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch('http://localhost:3000/bookings', {
+      const response = await fetch(`${API_BASE_URL}/bookings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

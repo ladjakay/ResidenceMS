@@ -8,6 +8,10 @@ interface EditBookingPageProps {
   params: Promise<{ id: string }>;
 }
 
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
+).replace(/\/+$/, '');
+
 export default function EditBookingPage({ params }: EditBookingPageProps) {
   const { id } = use(params);
   const router = useRouter();
@@ -26,7 +30,7 @@ export default function EditBookingPage({ params }: EditBookingPageProps) {
       localStorage.getItem('access_token') ||
       localStorage.getItem('accessToken');
 
-    fetch(`http://localhost:3000/bookings/${id}`, {
+    fetch(`${API_BASE_URL}/bookings/${id}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => {
@@ -58,7 +62,7 @@ export default function EditBookingPage({ params }: EditBookingPageProps) {
         localStorage.getItem('access_token') ||
         localStorage.getItem('accessToken');
 
-      const response = await fetch(`http://localhost:3000/bookings/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/bookings/${id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

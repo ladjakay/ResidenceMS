@@ -15,6 +15,10 @@ export interface Client {
   _count?: { bookings: number };
 }
 
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
+).replace(/\/+$/, '');
+
 export default function ClientsPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -54,7 +58,7 @@ export default function ClientsPage() {
       if (search) queryParams.append('search', search);
       if (statusFilter) queryParams.append('status', statusFilter);
 
-      const response = await fetch(`http://localhost:3000/clients?${queryParams.toString()}`, {
+      const response = await fetch(`${API_BASE_URL}/clients?${queryParams.toString()}`, {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
@@ -141,8 +145,8 @@ export default function ClientsPage() {
         localStorage.getItem('accessToken');
 
       const url = editingClient
-        ? `http://localhost:3000/clients/${editingClient.id}`
-        : 'http://localhost:3000/clients';
+        ? `${API_BASE_URL}/clients/${editingClient.id}`
+        : `${API_BASE_URL}/clients`;
 
       const method = editingClient ? 'PATCH' : 'POST';
 
@@ -182,7 +186,7 @@ export default function ClientsPage() {
         localStorage.getItem('access_token') ||
         localStorage.getItem('accessToken');
 
-      const response = await fetch(`http://localhost:3000/clients/${client.id}/status`, {
+      const response = await fetch(`${API_BASE_URL}/clients/${client.id}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
